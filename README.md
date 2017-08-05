@@ -1,5 +1,5 @@
 # DenPro
-Fast software that calculates <b>den</b>sity <b>pro</b>file and precise mean density of aligned DNA sequence into inside and outside given regions.<br>
+Fast software that calculates <b>Den</b>sity <b>Pro</b>file and precise mean density of aligned DNA sequence into inside and outside given regions.<br>
 ‘Density profile’ means a set of frequencies of the observed equal parts of the sequence with the same density. The program splits each given region over equal parts (called ‘windows’), and then counts the windows with the same density.<br>
 ‘Precise’ means that all the undefined regions in reference genome (i.e. regions filled by running ambiguous reference characters ‘N’) are excluded from consideration.<br>
 If the input regions are not defined, the results will be calculated for the entire chromosome (each one in the sequence).
@@ -7,7 +7,7 @@ If the input regions are not defined, the results will be calculated for the ent
 It runs on the command line under Windows, Linux and Mac OS X.
 
 ## Usage
-DenPro [options] -g|--gen <name> sequence
+```DenPro [options] -g|--gen <name> sequence```
 
 ## Help
 ```
@@ -43,7 +43,7 @@ Zipped files (.gz) are accepted too.
 
 ### Output
 Mean density is measured in read per kilobase.<br>
-Density profile is printed as a set of pairs <number of read in window> – <count of window>.<br>
+Density profile is printed as a set of pairs \<number of read in window> – \<count of window>.<br>
 The results are calculated for each chromosome separately, but the total mean density is printed as well.<br>
 The results are printed on the screen and duplicated into a plain text file with a name ‘DenPro_out.txt’, located in current directory.<br>
 
@@ -85,7 +85,7 @@ Score threshold for treated reads. Reads with the score equal or less then state
 Default: all reads are accepted.
 
 ```--cons <int>```
-Step of number of consolidated windows. Allows to reduce output for very spread distribution by merging reads count for more than one ascending step. For example, setting the value of 5 will result in the issuance of pairs of <1-5 reads> – <N1 windows>, <6-10 reads> – <N2 windows> etc., in addition to ordinary output <1 read> – <X1 windows>, <2 reads> – <X2 windows> etc.<br>
+Step of number of consolidated windows. Allows to reduce output for very spread distribution by merging reads count for more than one ascending step. For example, setting the value of 5 will result in the issuance of pairs of \<1-5 reads> – \<N1 windows>, \<6-10 reads> – \<N2 windows> etc., in addition to ordinary output \<1 read> – \<X1 windows>, \<2 reads> – \<X2 windows> etc.<br>
 Default: 1 (no consolidation).
 
 ```-f|--fbed <name>```
