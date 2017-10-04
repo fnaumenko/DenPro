@@ -137,12 +137,11 @@ const string sDensUnit = "rd/kbs";
 // Initializes In-|Out-Read's distribution container:
 // for each chromosome initializes default Regions and PairReadDistrib.
 // Only chromosomes marked as 'Treated' would be treated.
-//	@cID: chromosome's ID
 //	@bedR: Reads wich are distribeted
 //	@gName: chrom.sizes file or genome directory, determining define Regions
 //	@bedF: features determining peaks or NULL
 GenomeReadDistrib::GenomeReadDistrib (
-	chrid cID, const BedR & bedR, 
+	const BedR & bedR, 
 	GenomeRegions& gRegn,
 	const BedF* bedF) 
 	: _twoDistrs(bedF ? true : false)

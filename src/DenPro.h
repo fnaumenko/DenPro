@@ -10,11 +10,11 @@ enum optValue {
 	oMINSCR,
 	oCONS,
 	oFBED,
-	oEXPLEN,
+	oEXTLEN,
 	oSPACE,
+	oINFO,
 	oALARM,
-	oSTATS,
-	//oOUTFILE,
+	oOUTFILE,
 	oTIME,
 	oVERSION,
 	oHELP
@@ -47,7 +47,7 @@ private:
 public:
 	static chrlen	WinLen;		// user-defined length of sliding window
 
-	DenPro(chrid cID, BedR &bed, GenomeRegions &gRegn, BedF *fbed);
+	DenPro(BedR &bed, GenomeRegions &gRegn, BedF *fbed);
 	
 	// Initializes precise Read's distribution
 	//	@grDistr: genome reads distribution

@@ -1,7 +1,14 @@
 /*
- * DensPro
- * Copyright (C) 2014 Fedor Naumenko
-*/
+	DenPro calculates density profile and precise mean density of aligned DNA sequences
+	inside and outside of a given regions. 
+	
+	Copyright (C) 2017 Fedor Naumenko (fedor.naumenko@gmail.com)
+
+	This program is free software. It is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY;
+	without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+	See the	GNU General Public License for more details.
+ */
 
 #include "DenPro.h"
 #include <fstream>	// for dout
@@ -13,43 +20,51 @@ const string Product::Version = "1.0";
 const string Product::Descr = "Density Profile";
 
 const string OutFile = string(Product::Title) +  "_out.txt";
-const string HelpOutFile = "duplicate standart output to " + OutFile + " file";
+const string HelpOutFile = "duplicate standard output to " + OutFile + " file";
 const string Alignment = "alignment";
 
 enum eOptGroup	{ oINPUT, oTREAT, oOUTPUT, oOTHER };	// oOTHER should be the last 
 const BYTE	Options::_GroupCount = oOTHER + 1;
 
 const char* Options::_OptGroups [] = {
-	"Input", "Treatment", "Ambig output", "Other"
+	"Input", "Treatment", "Output", "Other"
 };
 
+// --info option: types of info notations
+const char* infos [] = { "NOTE", "STAT" };	// corresponds to eInfo; iOFF is hidden
+
+//	{ char,	str,	Signs,	type,	group,	defVal,	minVal,	maxVal,	strVal,	descr }
+// field 7: vUNDEF if value is prohibited
+// field 6: vUNDEF if no default value should be printed
 Options::Option Options::_Options [] = {
-	{ 'g', "gen",	1, true, tNAME, oINPUT, vUNDEF, 0, 0, NULL,
-	"genome size file, or genome library, or single nucleotide sequence" },
-	{ HPH, "gap-len",0,true, tINT,	oINPUT, 1000, 10, 100000, NULL,
+	{ 'g', "gen",	1,	tNAME,	oINPUT, vUNDEF, 0, 0, NULL,
+	"reference genome size file, genome library,\nor single nucleotide sequence. Required" },
+	{ HPH,"gap-len",0,	tINT,	oINPUT, 1000, 10, 100000, NULL,
 	"minimal length of undefined nucleotides region in genome\nwhich is declared as a gap.\nIgnored for genome size file" },
-	{ 'd', "dupl",	0, true, tENUM,	oINPUT, TRUE,	0, 2, (char*)Options::Booleans,
+	{ 'd', "dupl",	0,	tENUM,	oINPUT, TRUE,	0, 2, (char*)Options::Booleans,
 	"accept duplicate reads" },
-	{ HPH, "diff-sz",	0, true, tENUM,	oINPUT, FALSE,	0, 2, (char*)Options::Booleans,
+	{ HPH, "diff-sz",	0,	tENUM,	oINPUT, FALSE,	0, 2, (char*)Options::Booleans,
 	"allow to ignore reads with different size" },
-	{ 'c',Chrom::Abbr,	0,true,tCHAR, oTREAT, vUNDEF, 0, 0, NULL,
+	{ 'c', Chrom::Abbr,	0,	tCHAR,	oTREAT, vUNDEF, 0, 0, NULL,
 	"treat stated chromosome only (all)" },
-	{ HPH, "min-scr",	0, true, tINT, oTREAT, vUNDEF, 0, 1000, NULL, "score threshold for treated reads (lack)" },
-	{ HPH, "cons",	0, true, tINT, oTREAT, vUNDEF, 2, 500, NULL, "step of number of consolidated reads" },
-	{ 'f', "fbed",	0, true, tNAME, oTREAT, vUNDEF,	0, 0, NULL,
-	"'template' bed file which features define given regions" },
-	{ 'e',"exp-len",0, true, tINT,	oTREAT, 0, 0, 1e3, NULL,
-	"length of expanding features in 'template' bed file" },
-	{ 's',"space",	0, true, tINT,	oTREAT, 50, 1, 1e4, NULL,
+	{ HPH, "min-scr",	0,	tINT,	oTREAT, vUNDEF, 0, 1000, NULL,
+	"score threshold for treated reads (lack)" },
+	{ HPH, "cons",	0,	tINT,	oTREAT, vUNDEF, 2, 500, NULL,
+	"step of number of consolidated reads" },
+	{ 'f', "fbed",	0,	tNAME,	oTREAT, vUNDEF,	0, 0, NULL,
+	"'template' bed file which features define treated regions" },
+	{ 'e',"ext-len",0,	tINT,	oTREAT, 0,	0, 1e3, NULL,
+	"length by which the features in 'template' bed file\nextend in both directions" },
+	{ 's',"space",	0,	tINT,	oTREAT, 100, 1, 1e4, NULL,
 	"resolution: span in bp in which reads will be counted\nto define a density" },
-	{ HPH, "alarm",	0, false,tENUM, oOUTPUT,FALSE,	0, 2, NULL,
-	"output features ambiguities, if they exist" },
-	{ HPH, "stat",	0, false,tENUM, oOUTPUT,FALSE,	0, 2, NULL,
-	"output features ambiguities statistics, if they exist" },
-	//{ 'o', "out",	0, false,tENUM, oOUTPUT,FALSE,	0, 2, NULL, HelpOutFile.c_str() },
-	{ 't', "time",	0, false,tENUM, oOTHER,	FALSE,	0, 2, NULL, "output run time" },
-	{ 'v', Version,	0, false,tVERS,	oOTHER, vUNDEF, 0, 0, NULL, "print program's version and quit" },
-	{ 'h', "help",	0, false,tHELP,	oOTHER, vUNDEF, 0, 0, NULL, "print usage information and quit" }
+	{ 'i', "info",	0,	tENUM,	oOUTPUT,Bed::iOFF, Bed::iNOTE, Bed::iSTAT, (char*)infos,
+	"output summary information about feature ambiguities, if they exist:\n? - notice, ? - statistics" },
+	{ 'w', "warn",	0,	tENUM,	oOUTPUT,FALSE,	vUNDEF, 2, NULL,
+	"output each feature ambiguity, if they exist" },
+	{ 'o', "out",	0,	tENUM,	oOUTPUT,FALSE,	vUNDEF, 2, NULL, HelpOutFile.c_str() },
+	{ 't', "time",	0,	tENUM,	oOTHER,	FALSE,	vUNDEF, 2, NULL, "output run time" },
+	{ 'v', Version,	0,	tVERS,	oOTHER,	vUNDEF, vUNDEF, 0, NULL, "print program's version and quit" },
+	{ 'h', "help",	0,	tHELP,	oOTHER,	vUNDEF, vUNDEF, 0, NULL, "print usage information and quit" }
 };
 
 const BYTE	Options::_OptCount = oHELP + 1;
@@ -64,52 +79,47 @@ dostream dout(cout, outfile);	// stream's duplicator
 /*****************************************/
 int main(int argc, char* argv[])
 {
-	if (argc < 2)	
-	{ Options::PrintUsage(false);	return 0; }		// output tip
+	if (argc < 2)	return Options::PrintUsage(false);			// output tip
+	int fileInd = Options::Tokenize(argc, argv);
+	if( fileInd < 0 )	return 1;								// wrong option
+	if(!Chrom::SetStatedID(Options::GetSVal(oCHROM))) return 1;	// wrong chrom name
 
-	short fileInd = Options::Tokenize(argc, argv, Alignment.c_str());
-	if( fileInd < 0 )	return 1;		// wrong otpion
 	int ret = 0;						// main() return code
-	
-	BedF *bedF = NULL;
-	bool getTime = Options::GetBVal(oTIME);
-	outfile.open(OutFile.c_str());
-	Timer timer(getTime);
-	timer.Start();
+	const ChromSizes* cSizes = NULL;
+	BedF *templ = NULL;
+	if( Options::GetBVal(oOUTFILE) )	outfile.open( OutFile.c_str() );
+	Timer::Enabled = Options::GetBVal(oTIME);
+	Timer timer;
 	try {
 		// check file names first of all
-		const char *genName  = FS::CheckedFileDirName(oGFILE);
-		const char* rBedName = FS::CheckedFileName(argv[fileInd]);
-		const char* fBedName = Options::GetSVal(oFBED);
-		bool alarm	= Options::GetBVal(oALARM);		// print ambiguity messages
-		bool stats	= Options::GetBVal(oSTATS);		// print ambiguity statistics
-		chrid cID	= Chrom::ID(Options::GetSVal(oCHROM));
-		Timer timer = Timer(Options::GetBVal(oTIME));
+		const char* gName  = FS::CheckedFileDirName(oGFILE);	// genome name
+		const char* aName = FS::CheckedFileName(argv[fileInd]);	// alignment name
+		const char* tName = Options::GetSVal(oFBED);			// template name
+		bool alarm	= Options::GetBVal(oALARM);					// print ambiguity messages
+		Bed::eInfo info	= Bed::eInfo(Options::GetIVal(oINFO));	// print ambiguities info
+		GenomeRegions gRgns(gName, cSizes, Options::GetIVal(oGAPLEN));
 
-		if( fBedName ) {
+		if( tName ) {
 			dout << Template << MSGSEP_BLANK;
-			bedF = new BedF(FS::CheckedFileName(fBedName), cID, true, true, alarm, stats);
-			bedF->Expand(Options::GetIVal(oEXPLEN), false);
+			templ = new BedF(FS::CheckedFileName(tName), cSizes, true, true, info, alarm);
+			templ->Extend(Options::GetIVal(oEXTLEN), false);
+			templ->CheckFeaturesLength(Options::GetIVal(oSPACE), "space", "template");
 		}
-		BedR bedR((Alignment + MSGSEP_BLANK).c_str(), rBedName, cID, true, getTime, true, alarm, stats,
+		BedR align((Alignment + MSGSEP_BLANK).c_str(), aName, cSizes, true, true, info, alarm,
 			Options::GetBVal(oDUPL), Options::GetBVal(oDIFFSZ), Options::GetIVal(oMINSCR));
-
-		if( bedF && !SetCommonChroms(bedR, *bedF, false) )
+		if( templ && !SetCommonChroms(align, *templ, false) )
 			Err("no common chromosomes", "").Throw();
 		dout << EOL;
-		GenomeRegions grgn(genName, &cID, Options::GetIVal(oGAPLEN));
-		DenPro(cID, bedR, grgn, bedF);
+		
+		DenPro(align, gRgns, templ);
 	}
 	catch(Err &e)		{ ret = 1;	dout << e.what() << EOL; }
 	catch(exception &e)	{ ret = 1;	dout << e.what() << EOL; }
 	catch(...)			{ ret = 1;	dout << "Unregistered error\n"; }
-	if( bedF )	delete bedF;
-
+	if(cSizes)	delete cSizes;
+	if(templ)	delete templ;
 	timer.Stop(true);
 	if( outfile.is_open() )		outfile.close();	// in case of holding execution by user
-//#ifdef OS_Windows
-//	system("pause");
-//#endif
 	return ret;
 }
 
@@ -118,10 +128,10 @@ chrlen	DenPro::WinLen = 0;
 //const char* sRatio = "ratio";
 //const string sDensUnit = sReads + "/kbs";
 
-DenPro::DenPro(chrid cID, BedR &bedR, GenomeRegions &gRegn, BedF *bedF)
+DenPro::DenPro(BedR &bedR, GenomeRegions &gRegn, BedF *bedF)
 {
 	WinLen = Options::GetIVal(oSPACE);
-	GenomeReadDistrib grDist(cID, bedR, gRegn, bedF);
+	GenomeReadDistrib grDist(bedR, gRegn, bedF);
 	grDist.Scan(WinLen);
 	grDist.PrintDensity();
 
@@ -130,7 +140,7 @@ DenPro::DenPro(chrid cID, BedR &bedR, GenomeRegions &gRegn, BedF *bedF)
 	if( bedF )  rCnt += Init(grDist, PairReadDistrib::IN_P);
 	rCnt += Init(grDist, PairReadDistrib::OUT_P);
 	dout << "\nDistributed " << BedR::ReadTitle(true) << MSGSEP_BLANK
-			<< rCnt << sPercent(rCnt, ULLONG(bedR.ReadsCount(cID)), 3) << EOL;
+			<< rCnt << sPercent(rCnt, ULLONG(bedR.ReadsCount(Chrom::StatedID())), 3) << EOL;
 
 	Consolidate(Options::GetIVal(oCONS));
 	Print(outfile);

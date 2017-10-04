@@ -161,11 +161,10 @@ public:
 	// Initializes In-|Out-Read's distribution container:
 	// for each chromosome initializes default Regions and PairReadDistrib.
 	// Only chromosomes marked as 'Treated' would be treated.
-	//	@cID: chromosome's ID
 	//	@bedR: Reads wich are distribeted
 	//	@gRegn: define genome Regions
 	//	@bedF: features determining peaks or NULL
-	GenomeReadDistrib(chrid cID, const BedR& bedR, GenomeRegions& gRegn, const BedF* bedF);
+	GenomeReadDistrib(const BedR& bedR, GenomeRegions& gRegn, const BedF* bedF);
 	
 	// Initializes and fills In-|Out-Read's distribution for each chromosome in genome
 	//	@winLen: length of layout (cutting) window
