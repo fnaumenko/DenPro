@@ -55,9 +55,11 @@ Treatment:
   -e|--exp-len <int>    length of expanding features in 'template' bed file [0]
   -s|--space <int>      resolution: span in bps in which reads will be counted
                         to define a density [50]
-Ambig output:
-  --alarm               output features ambiguities, if they exist
-  --stat                output features ambiguities statistics, if they exist
+Output:
+  -i|--info <NOTE|STAT> output summary information about feature ambiguities, if they exist:
+                        NOTE - notice, STAT - statistics
+  -w|--warn             output each feature ambiguity, if they exist
+  -o|--out              duplicate standard output to DenPro_out.txt file
 Other:
   -t|--time             output run time
   -v|--version          print program's version and quit
@@ -82,7 +84,7 @@ Enumerable option values are case insensitive.
 Enumerable option values are case insensitive.
 
 ```-g|--gen <file>```<br>
-Сhromosome sizes file, genome library, or single nucleotide sequence.<br>
+Chromosome sizes file, genome library, or single nucleotide sequence.<br>
 Genome library is a directory contained nucleotide sequences for each chromosome in [FASTA](https://en.wikipedia.org/wiki/FASTA_format) format.<br>
 If ```name``` is a .fa[.gz] file, **DenPro** accepts the corresponding chromosome as the only treated.<br>
 Otherwise first the program searches for .fa files in the directory ```name```. 
@@ -111,7 +113,7 @@ Default: ```ON```
 ```--diff-sz <OFF|ON>```<br>
 Ignore reads with different length. 
 Such reads are obtained for some alignments, especially in paired end mode. 
-They are scanty for **Bowtie2**, **BWA**, but can reach hundreds (**MOSAIK**) or even thousands (**SMALT**).
+They are scanty for **Bowtie2**, **BWA**, but can reach hundreds (**MOSAIK**) or even thousands (**SMALT**). 
 This option allows to continue the calculation, otherwise the sequence is considered as incorrect. 
 Issuance of information on such reads is regulated by options ```––i|info``` and ```–w|-–warn```.<br>
 Default: ```OFF```
