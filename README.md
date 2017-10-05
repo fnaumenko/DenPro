@@ -82,7 +82,7 @@ Enumerable option values are case insensitive.
 Enumerable option values are case insensitive.
 
 ```-g|--gen <file>```<br>
-Genome size file, genome library, or single nucleotide sequence.<br>
+Сhromosome sizes file, genome library, or single nucleotide sequence.<br>
 Genome library is a directory contained nucleotide sequences for each chromosome in [FASTA](https://en.wikipedia.org/wiki/FASTA_format) format.<br>
 If ```name``` is a .fa[.gz] file, **DenPro** accepts the corresponding chromosome as the only treated.<br>
 Otherwise first the program searches for .fa files in the directory ```name```. 
@@ -111,7 +111,7 @@ Default: ```ON```
 ```--diff-sz <OFF|ON>```<br>
 Ignore reads with different length. 
 Such reads are obtained for some alignments, especially in paired end mode. 
-They are scanty for Bowtie2, BWA, but can reach hundreds (MOSAIK) or even thousands (SMALT). 
+They are scanty for **Bowtie2**, **BWA**, but can reach hundreds (**MOSAIK**) or even thousands (**SMALT**).
 This option allows to continue the calculation, otherwise the sequence is considered as incorrect. 
 Issuance of information on such reads is regulated by options ```––i|info``` and ```–w|-–warn```.<br>
 Default: ```OFF```
