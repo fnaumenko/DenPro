@@ -84,7 +84,7 @@ Enumerable option values are case insensitive.
 Enumerable option values are case insensitive.
 
 ```-g|--gen <file>```<br>
-Chromosome sizes file, genome library, or single nucleotide sequence.<br>
+Chromosome sizes file, reference genome library, or single nucleotide sequence.<br>
 Genome library is a directory contained nucleotide sequences for each chromosome in [FASTA](https://en.wikipedia.org/wiki/FASTA_format) format.<br>
 If ```name``` is a .fa[.gz] file, **DenPro** accepts the corresponding chromosome as the only treated.<br>
 Otherwise first the program searches for .fa files in the directory ```name```. 
