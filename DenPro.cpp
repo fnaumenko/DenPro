@@ -38,7 +38,7 @@ const char* infos [] = { "NOTE", "STAT" };	// corresponds to eInfo; iOFF is hidd
 // field 6: vUNDEF if no default value should be printed
 Options::Option Options::_Options [] = {
 	{ 'g', "gen",	1,	tNAME,	oINPUT, vUNDEF, 0, 0, NULL,
-	"reference chromosome sizes file, genome library,\nor single nucleotide sequence. Required" },
+	"chromosome sizes file, reference genome library,\nor single nucleotide sequence. Required" },
 	{ HPH,"gap-len",0,	tINT,	oINPUT, 1000, 10, 100000, NULL,
 	"minimal length of undefined nucleotides region in genome\nwhich is declared as a gap.\nIgnored for genome size file" },
 	{ 'd', "dupl",	0,	tENUM,	oINPUT, TRUE,	0, 2, (char*)Options::Booleans,
