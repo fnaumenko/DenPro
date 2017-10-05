@@ -1,7 +1,7 @@
 # DenPro
 Fast software that calculates <b>Den</b>sity <b>Pro</b>file and precise mean density of aligned DNA sequence into inside and outside given regions.<br>
-‘Density profile’ means a set of frequencies of the observed equal parts of the sequence with the same density. The program splits each given region over equal parts (called ‘windows’), and then counts the windows with the same density.<br>
-‘Precise’ means that all the undefined regions in reference genome (i.e. regions filled by running ambiguous reference characters ‘N’) are excluded from consideration.<br>
+*Density profile* means a set of frequencies of the observed equal parts of the sequence with the same density. The program splits each given region over equal parts (called ‘windows’), and then counts the windows with the same density.<br>
+*Precise* means that all the undefined regions in reference genome (i.e. regions filled by running ambiguous reference characters ‘N’) are excluded from consideration.<br>
 If the input regions are not defined, the results will be calculated for the entire chromosome (each one in the sequence).
 
 The program runs on the command line under Linux and Windows.
@@ -41,7 +41,7 @@ To be sure about **zlib** on your system, type ```whereis zlib```.
 ## Help
 ```
 Input:
-  -g|--gen <name>       genome size file, genome library, or single nucleotide sequence. Required
+  -g|--gen <name>       chromosome sizes file, genome library, or single nucleotide sequence. Required
   --gap-len <int>       minimal length of undefined nucleotides region in genome
                         which is declared as a gap.
                         Ignored for genome size file [1000]
@@ -76,10 +76,10 @@ Compressed files in gzip format (.gz) are acceptable.
 Mean density is measured in read per kilobase.<br>
 Density profile is printed as a set of pairs \<number of read in window> – \<count of window>.<br>
 The results are calculated for each chromosome separately, and the total mean density is printed.<br>
-The results are printed on the screen and duplicated into a plain text file with a name ‘DenPro_out.txt’, located in current directory.<br>
 
 ### Options
-Non-numeric option values are case insensitive.
+Enumerable option values are case insensitive.
+Enumerable option values are case insensitive.
 
 ```-g|--gen <file>```<br>
 Genome size file, genome library, or single nucleotide sequence.<br>
@@ -93,7 +93,7 @@ Undefined regions are regions with only ambiguous reference characters ‘N’ i
 The minimal length of accounting gaps is managed by ```--gap-len``` option.<br>
 For example, chromosome 1 from mm9 library contains 14 regions, separated by gaps with length more then 400 bps, and 10 regions, separated by gaps with length more then 1000.<br>
 Indicating genome library has the same effect as ```-f|--fbed``` option, where ‘template’ is a set of defined regions.<br>
-The program searches for gaps once, on subsequent calls with the same length of gaps, it uses the search results stored in the specified directory.<br>
+The program searches for gaps once. On subsequent calls with the same length of gaps, it uses the search results stored in the specified directory.<br>
 The program also generates once a chromosome sizes file in the same directory.<br>
 One can obtain a genome library in  UCSC: ftp://hgdownload.soe.ucsc.edu/goldenPath/ or in Ensemble: ftp://ftp.ensembl.org/pub/release-73/fasta storage. 
 In the second case please copy genomic sequences with the same masked type only, f.e. unmasked (‘dna'), since program does not recognise mask’s types.<br>
@@ -118,7 +118,7 @@ Default: ```OFF```
 
 ```-c|--chr <chars>```<br>
 Treat stated chromosome only. Samples of option’s value: 1, 20, X.<br>
-RReduces run time on 1.5-20 times depending on how far this chromosome is placed in an alignment.<br>
+Reduces run time on 1.5-20 times depending on how far this chromosome is placed in an alignment.<br>
 Default: all.
 
 ```--min-scr <int>```<br>
