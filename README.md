@@ -8,7 +8,6 @@ The program runs on the command line under Linux and Windows.
 
 ## Installation
 ### Ready executable file
-Try this way first. 
 
 **Linux**<br>
 Go to the desire directory and type commands:<br>
