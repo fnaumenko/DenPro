@@ -41,7 +41,7 @@ To be sure about **zlib** on your system, type ```whereis zlib```.
 ## Help
 ```
 Input:
-  -g|--gen <name>       chromosome sizes file, genome library, or single nucleotide sequence. Required
+  -g|--gen <name>       chromosome sizes file, reference genome library, or single nucleotide sequence. Required
   --gap-len <int>       minimal length of undefined nucleotides region in genome
                         which is declared as a gap.
                         Ignored for genome size file [1000]
