@@ -7,7 +7,7 @@ If the input regions are not defined, the results will be calculated for the ent
 The program runs on the command line under Linux and Windows.
 
 ## Installation
-### Ready executable file
+### Executable file
 
 **Linux**<br>
 Go to the desire directory and type commands:<br>
@@ -40,20 +40,21 @@ To be sure about **zlib** on your system, type ```whereis zlib```.
 ## Help
 ```
 Input:
-  -g|--gen <name>       chromosome sizes file, reference genome library, or single nucleotide sequence. Required
+  -g|--gen <name>       chromosome sizes file, genome library, or single nucleotide sequence. Required
   --gap-len <int>       minimal length of undefined nucleotides region in genome
                         which is declared as a gap.
                         Ignored for genome size file [1000]
   -d|--dupl <OFF|ON>    accept duplicate reads [ON]
   --diff-sz <OFF|ON>    allow to ignore reads with different size [OFF]
 Treatment:
-  -c|--chr <chars>      treat stated chromosome only (all)
+  -c|--chr <chars>      treat specified chromosome only (all)
   --min-scr <int>       score threshold for treated reads (lack)
   --cons <int>          step of number of consolidated reads
-  -f|--fbed <name>      'template' bed file which features define given regions
-  -e|--exp-len <int>    length of expanding features in 'template' bed file [0]
+  -f|--fbed <name>      'template' bed file which features define treated regions
+  -e|--ext-len <int>    length by which the features in 'template' bed file
+                        extend in both directions before treatment [0]
   -s|--space <int>      resolution: span in bps in which reads will be counted
-                        to define a density [50]
+                        to define a density [100]
 Output:
   -i|--info <NOTE|STAT> output summary information about feature ambiguities, if they exist:
                         NOTE - notice, STAT - statistics
@@ -85,15 +86,16 @@ Enumerable option values are case insensitive.
 ```-g|--gen <file>```<br>
 Chromosome sizes file, reference genome library, or single nucleotide sequence.<br>
 Genome library is a directory contained nucleotide sequences for each chromosome in [FASTA](https://en.wikipedia.org/wiki/FASTA_format) format.<br>
-If ```name``` is a .fa[.gz] file, **DenPro** accepts the corresponding chromosome as the only treated.<br>
-Otherwise first the program searches for .fa files in the directory ```name```. 
-If there are no such files in this directory, **DenPro** searches for .fa.gz files.<br>
-If chromosome is stated by option ```–c|--chr```, the program searches for the corresponding .fa[.gz] file.<br>
+If ```name``` is a *.fa[.gz]* file, **DenPro** accepts the corresponding chromosome as the only treated.<br>
+Otherwise first the program searches for *.fa* files in the directory ```name```. 
+If there are no such files in this directory, **DenPro** searches for *.fa.gz* files.<br>
+If chromosome is stated by option ```–c|--chr```, the program searches for the corresponding *.fa[.gz]* file.<br>
+The chromosome sizes file is recognized by *.sizes* extension.<br>
 The difference between chromosome sizes file and genome library/file is that in the latter all the undefined regions in the reference genome (gaps), will be excluded from calculation.<br>
 Undefined regions are regions with only ambiguous reference characters ‘N’ in them.<br>
 The minimal length of accounting gaps is managed by ```--gap-len``` option.<br>
 For example, chromosome 1 from mm9 library contains 14 regions, separated by gaps with length more then 400 bps, and 10 regions, separated by gaps with length more then 1000.<br>
-Indicating genome library has the same effect as ```-f|--fbed``` option, where ‘template’ is a set of defined regions.<br>
+Indicating genome library has the same effect as ```-f|--fbed``` option, where 'template' is a set of defined regions.<br>
 The program searches for gaps once. On subsequent calls with the same length of gaps, it uses the search results stored in the specified directory.<br>
 The program also generates once a chromosome sizes file in the same directory.<br>
 One can obtain a genome library in  UCSC: ftp://hgdownload.soe.ucsc.edu/goldenPath/ or in Ensemble: ftp://ftp.ensembl.org/pub/release-73/fasta storage. 
@@ -101,7 +103,8 @@ In the second case please copy genomic sequences with the same masked type only,
 This option is required.
 
 ```--gap-len <int>```<br>
-Minimal length of undefined nucleotides region which is taken as a gap. For more details see ```-g|--gen``` option.<br>
+Minimal length of undefined nucleotides region which is taken as a gap. 
+For more details see ```-g|--gen``` option.<br>
 Ignored for chromosome sizes file, specified by ```-g|--gen```.<br>
 Default: 1000
 
@@ -111,14 +114,13 @@ Default: ```ON```
 
 ```--diff-sz <OFF|ON>```<br>
 Ignore reads with different length. 
-Such reads are obtained for some alignments, especially in paired end mode. 
-They are scanty for **Bowtie2**, **BWA**, but can reach hundreds (**MOSAIK**) or even thousands (**SMALT**). 
+Such reads can be produced by some aligners, especially in paired end mode.<br> 
 This option allows to continue the calculation, otherwise the sequence is considered as incorrect. 
 Issuance of information on such reads is regulated by options ```––i|info``` and ```–w|-–warn```.<br>
 Default: ```OFF```
 
 ```-c|--chr <chars>```<br>
-Treat stated chromosome only. Samples of option’s value: 1, 20, X.<br>
+Treat specified chromosome only. Samples of option’s value: 1, 20, X.<br>
 Reduces run time on 1.5-20 times depending on how far this chromosome is placed in an alignment.<br>
 Default: all.
 
@@ -134,20 +136,27 @@ For example, setting the value of 5 will result in the issuance of pairs of \<1-
 Default: 1 (no consolidation).
 
 ```-f|--fbed <name>```<br>
-'Template' ordinary bed file with features that defines given regions.
+'Template' ordinary bed file with features that defines treated regions. 
+The density profile will be constructed on the region resulting from the merger of all regions specified by the 'template' regions.<br>
+This option abolishes the merge of defined regions specified by ```-g|--gen <name>``` option.
 
-```-e|--exp-len <int>```<br>
-Length of expanding regions in 'template' bed file.<br>
-If set, all the features from 'template' bed file are be-expanding before processing: *start* positions are decreased for this value, *end* positions are increased.<br>
-If expanded features become intersected, they are joined.<br>
+```-e|--ext-len <int>```<br>
+Value by which all features in 'template' bed should be stretched in both directions before the density count.<br>
+If set, all the features from 'template' bed file will be stretched before processing: *start* positions are decreased for this value, *end* positions are increased.<br>
+If stretched features become intersected, they are joined.<br>
 This option is constructed for the special cases, for instance, ChIP-seq treatment of transcription factor binding sites (TFBS). 
-Such binding sites have a well-defined length (8-20 bps), while the length of corresponded enriched regions can reach 500-2000 pb, but also uniform. 
+Such binding sites have a well-defined uniform length (8-20 bp), while the length of corresponded enriched regions can reach 500-2000 pb. 
 If we know the TFBS coordinates, we can calculate read density within enriched regions immediately, by placing coordinates as 'template' bed file and setting this option.<br>
 This option is only relevant in addition to the option ```-f|--fbed```.<br>
 Default: 0.
 
 ```-s|--space <int>```<br>
-Resolution: the length of windows (span) in bp in which reads will be counted to define a density.<br>
+Resolution: the length of windows (span) in bp by which reads will be counted to define a density.<br>
+Read is considered belonging to span if it`s centre is placed within the span. 
+Thus each read is counted once. 
+Then, while using the reference genome from the input sequences, and if 'template' is not specified, the reference undefined regions (gaps) are preliminarily removed from the compared sequences. 
+This means that the regions separated by a gap are merged.<br>
+As a result, the program compares the actual read density distributions.<br>
 Default: 100.
 
 ```-i|--info <NOTE|STAT>```<br>
