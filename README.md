@@ -132,7 +132,7 @@ Default: all reads are accepted.
 ```--cons <int>```<br>
 Step of number of consolidated windows. 
 Allows to reduce output for very spread distribution by merging reads count for more than one ascending step. 
-For example, setting the value of 5 will result in the issuance of pairs of \<1-5 reads> – \<N1 windows>, \<6-10 reads> – \<N2 windows> etc., in addition to ordinary output \<1 read> – \<X1 windows>, \<2 reads> – \<X2 windows> etc.<br>
+For example, setting the value of 5 will result in the issuance of pairs of \<1-5 reads>\<N1 windows>, \<6-10 reads>\<N2 windows> etc., in addition to ordinary output \<1 read>\<X1 windows>, \<2 reads>\<X2 windows> etc.<br>
 Default: 1 (no consolidation).
 
 ```-f|--fbed <name>```<br>
