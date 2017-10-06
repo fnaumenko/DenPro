@@ -40,7 +40,7 @@ To be sure about **zlib** on your system, type ```whereis zlib```.
 ## Help
 ```
 Input:
-  -g|--gen <name>       chromosome sizes file, genome library, or single nucleotide sequence. Required
+  -g|--gen <name>       chromosome sizes file, reference genome library, or single nucleotide sequence. Required
   --gap-len <int>       minimal length of undefined nucleotides region in genome
                         which is declared as a gap.
                         Ignored for genome size file [1000]
@@ -89,7 +89,7 @@ Genome library is a directory contained nucleotide sequences for each chromosome
 If ```name``` is a *.fa[.gz]* file, **DenPro** accepts the corresponding chromosome as the only treated.<br>
 Otherwise first the program searches for *.fa* files in the directory ```name```. 
 If there are no such files in this directory, **DenPro** searches for *.fa.gz* files.<br>
-If chromosome is stated by option ```–c|--chr```, the program searches for the corresponding *.fa[.gz]* file.<br>
+If chromosome is specified by option ```–c|--chr```, the program searches for the corresponding *.fa[.gz]* file.<br>
 The chromosome sizes file is recognized by *.sizes* extension.<br>
 The difference between chromosome sizes file and genome library/file is that in the latter all the undefined regions in the reference genome (gaps), will be excluded from calculation.<br>
 Undefined regions are regions with only ambiguous reference characters ‘N’ in them.<br>
