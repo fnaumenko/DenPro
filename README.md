@@ -1,8 +1,10 @@
 # DenPro
 Fast software that calculates <b>Den</b>sity <b>Pro</b>file and precise mean density of aligned DNA sequence into inside and outside given regions.<br>
-*Density profile* means a set of frequencies of the observed equal parts of the sequence with the same density. The program splits each given region over equal parts (called ‘windows’), and then counts the windows with the same density.<br>
-*Precise* means that all the undefined regions in reference genome (i.e. regions filled by running ambiguous reference characters ‘N’) are excluded from consideration.<br>
-If the input regions are not defined, the results will be calculated for the entire chromosome (each one in the sequence).
+*Density profile* means a set of frequencies of the observed equal parts of the sequence with the same density. 
+The program splits each given region into equal non-overlapping parts (windows), 
+and then counts the number of windows with the same density.<br>
+*Precise* means that all the undefined regions in the reference genome (i.e. regions filled by running ambiguous reference characters ‘N’) are excluded from consideration.<br>
+If the input regions are not defined, then only mean density is calculated for each chromosome.
 
 The program runs on the command line under Linux and Windows.
 
@@ -16,7 +18,8 @@ Go to the desire directory and type commands:<br>
 ```chmod +x DenPro```
 
 **Windows**<br>
-Download archive from [here](https://github.com/fnaumenko/DenPro/releases/download/1.0/DenPro-Windows-x64.zip) and unzip by any archiver, for instance **WinRar**.
+Download archive from [here](https://github.com/fnaumenko/DenPro/releases/download/1.0/DenPro-Windows-x64.zip) 
+and unzip by any archiver, for instance [WinRar](https://www.win-rar.com/download.html?&L=0).
 
 ### Compiling in Linux
 Required libraries:<br>
@@ -41,46 +44,44 @@ To be sure about **zlib** on your system, type ```whereis zlib```.
 ```
 Input:
   -g|--gen <name>       chromosome sizes file, reference genome library, or single nucleotide sequence. Required
-  --gap-len <int>       minimal length of undefined nucleotides region in genome
-                        which is declared as a gap.
-                        Ignored for genome size file [1000]
+  --gap-len <int>       minimal length of undefined nucleotides region in genome which is declared as a gap.
+                        Ignored for the genome size file [1000]
   -d|--dupl <OFF|ON>    accept duplicate reads [ON]
-  --diff-sz <OFF|ON>    allow to ignore reads with different size [OFF]
 Treatment:
-  -c|--chr <chars>      treat specified chromosome only (all)
-  --min-scr <int>       score threshold for treated reads (lack)
+  -c|--chr <chars>      treat specified chromosome only
+  --min-scr <int>       score threshold for treated reads
   --cons <int>          step of number of consolidated reads
   -f|--fbed <name>      'template' bed file which features define treated regions
-  -e|--ext-len <int>    length by which the features in 'template' bed file
-                        extend in both directions before treatment [0]
-  -s|--space <int>      resolution: span in bps in which reads will be counted
-                        to define a density [100]
+  -e|--ext-len <int>    length by which the features in the 'template' bed file
+                        will be extended in both directions before treatment [0]
+  -s|--space <int>      resolution: span in bp by which reads will be counted to define a density [100]
 Output:
-  -i|--info <NOTE|STAT> output summary information about feature ambiguities, if they exist:
-                        NOTE - notice, STAT - statistics
-  -w|--warn             output each feature ambiguity, if they exist
+  -i|--info <NM|CNT|STAT>       print information about file:
+                        NM - name only, CNT - number of reads, STAT - statistics [CNT]
+  -w|--warn             print each read ambiguity, if they exist
   -o|--out              duplicate standard output to DenPro_out.txt file
 Other:
-  -t|--time             output run time
-  -v|--version          print program's version and quit
-  -h|--help             print usage information and quit
-  ```
+  -t|--time             print run time
+  -v|--version          print program's version and exit
+  -h|--help             print usage information and exit 
+```
 
 ## Details
 
 ### Input
-Aligned DNA sequence in [BED](https://www.ensembl.org/info/website/upload/bed.html) format. 
-Chromosomes in sequence can be unsorted, but reads within each chromosome should be sorted.<br>
+Aligned DNA sequence in [BED](https://www.ensembl.org/info/website/upload/bed.html) format, in which reads should be clustered in chromosomes.<br> 
+For faster processing, reads belonging to the same chromosome also should be sorted in position ascending order.<br>
+The simplest way to prepare bed files is to sort them, for example by using **sortBed** utility from [bedtools](http://bedtools.readthedocs.io/en/latest/) package 
+(though for **DenPro** the order of the chromosomes themselves does not matter).<br>
 
 Compressed files in gzip format (.gz) are acceptable.
 
 ### Output
 Mean density is measured in read per kilobase.<br>
-Density profile is printed as a set of pairs \<number of read in window> – \<count of window>.<br>
-The results are calculated for each chromosome separately, and the total mean density is printed.<br>
+Density profile is printed as a set of a ‘key’-‘value’ pairs: \<number of read in window>\<count of window>.<br>
+The results are calculated for each chromosome separately, though the total mean density is also printed.
 
-### Options
-Enumerable option values are case insensitive.
+### Options description
 Enumerable option values are case insensitive.
 
 ```-g|--gen <file>```<br>
@@ -112,17 +113,9 @@ Default: 1000
 Accept or deny duplicated reads to participate in density calculation.<br>
 Default: ```ON```
 
-```--diff-sz <OFF|ON>```<br>
-Ignore reads with different length. 
-Such reads can be produced by some aligners, especially in paired end mode.<br> 
-This option allows to continue the calculation, otherwise the sequence is considered as incorrect. 
-Issuance of information on such reads is regulated by options ```––i|info``` and ```–w|-–warn```.<br>
-Default: ```OFF```
-
 ```-c|--chr <chars>```<br>
 Treat specified chromosome only. Samples of option’s value: 1, 20, X.<br>
 Reduces run time on 1.5-20 times depending on how far this chromosome is placed in an alignment.<br>
-Default: all.
 
 ```--min-scr <int>```<br>
 Score threshold for treated reads. 
@@ -159,24 +152,29 @@ This means that the regions separated by a gap are merged.<br>
 As a result, the program compares the actual read density distributions.<br>
 Default: 100.
 
-```-i|--info <NOTE|STAT>```<br>
-Output feature ambiguity statistics, if they exist.<br> 
-For alignments, such ambiguities can be duplicated reads or reads with different length (size).<br>
+```-i|--info <NM|CNT|STAT>```<br>
+Output information about number of items (features/reads/intervals).<br>
+```NM```:  brief output. Prints file names without any additional information.<br>
+```CNT```:  prints file names and number of all and accepted items, if they are different.<br>
+```STAT```: prints item ambiguities statistics, if they exist.<br>
+For the alignments, such ambiguities can be duplicated reads or reads with different length (size).<br>
+Thus, not all reads present in the file can be accepted.<br>
 In some circumstances you need to be aware of these issues. 
 There are two methods used to identify them: detailed and summary.<br>
-This option provides the summary method. 
+The ```STAT``` value provides the summary method. 
 It forces to display number of all recognized certain type ambiguities, and appropriate treatment.<br>
-If ```STAT``` value is set, the total number of reads left after treatment is displayed additionally.<br>
 In particular, this is a simple way to know the number of duplicated reads.<br>
 The detailed method is managed by option ```-w|--warn```.
 
 ```-w|--warn```<br>
-Output ambiguity for each feature, if they exist.<br>
+Output ambiguity for each read, if they exist.<br>
 If it is specified, information about type of ambiguity, number of line where it occurs, and resulting treatment would be printed each time it happens.<br>
-Duplicated reads are not printed when using this method as they are considered normal for alignment, but they are reported in the summary method, see ```-i|--info``` option.
+Duplicated reads are not printed when using this method as they are considered normal for the alignment, 
+but they are reported in the summary method, see ```-i|--info``` option.
 
 ```-o|--out```<br>
 Duplicate standard output to **DenPro_out.txt** file. 
 It is an analogue of the *tee* Linux command and is rather useful by calling **DenPro** under Windows.
 
-
+##
+If you face to bugs, incorrect English, or have commentary/suggestions, please do not hesitate to write me on fedor.naumenko@gmail.com
