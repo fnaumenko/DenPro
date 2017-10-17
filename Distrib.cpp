@@ -49,7 +49,6 @@ void ReadDistrib::ScanRegion(const Region& rgn)
 
 	while(start + _wCurrLen <= end) {	// current window belong to region entirely
 		if( _wi+1 == len )	return;
-		//res = ScanWindow(start);
 		_data[_wi] += ScanWindow(start, poutWin);
 		_wi++;
 		//if( _wi == static_cast<chrlen>(Length()) )
@@ -59,7 +58,6 @@ void ReadDistrib::ScanRegion(const Region& rgn)
 			_rtotalCnt++;
 			_ri++;
 		}
-		//else if( res == 0 )		dout << "0:\t" << _wi << TAB << start << EOL;
 		start += _wCurrLen;
 		_wCurrLen = _owner->WinLength();	// set user's win length
 	}
@@ -230,16 +228,13 @@ void GenomeReadDistrib::PrintDensity()
 		outDens = DENS_BASE * it->second.Density(PairReadDistrib::OUT_P);
 		dout << outDens;
 
-		//dout << EOL;
-		//it->second._rDistribs[PairReadDistrib::OUT_P].Print();
-
 		rOutCnt += it->second.ReadsCount(PairReadDistrib::OUT_P);
 		wOutCnt += it->second.WinsCount(PairReadDistrib::OUT_P);
 		if(_twoDistrs)	dout << TAB << TAB << inDens/outDens;
 		dout << EOL;
 	}
 	if( ChromsCount() > 1 ) {
-		dout << Total << ":\t";
+		dout << Total << SepClTab;
 		if(_twoDistrs) {
 			inDens = DENS_BASE * float(rInCnt) / wInCnt / _wLen;
 			dout << inDens << TAB << TAB;

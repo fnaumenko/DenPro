@@ -104,7 +104,7 @@ int main(int argc, char* argv[])
 		BedR align("alignment", aName, cSizes, info, true, true, alarm,
 			Options::GetBVal(oDUPL), Options::GetIVal(oMINSCR));
 		if( templ && !SetCommonChroms(align, *templ, false) )
-			Err("no common chromosomes", "").Throw();
+			Err("no common chromosomes").Throw();
 		dout << EOL;
 		
 		DenPro(align, gRgns, templ);
@@ -135,8 +135,8 @@ DenPro::DenPro(BedR &bedR, GenomeRegions &gRegn, BedF *bedF)
 	ULONG rCnt = 0;
 	if( bedF )  rCnt += Init(grDist, PairReadDistrib::IN_P);
 	rCnt += Init(grDist, PairReadDistrib::OUT_P);
-	dout << "\nDistributed " << bedR.ItemTitle(true) << SepSC
-			<< rCnt << sPercent(rCnt, ULLONG(bedR.ReadsCount(Chrom::StatedID())), 3) << EOL;
+	dout << "\nDistributed " << bedR.ItemTitle(true) << SepSCl
+		 << rCnt << sPercent(rCnt, ULLONG(bedR.ReadsCount(Chrom::StatedID())), 3) << EOL;
 
 	Consolidate(Options::GetIVal(oCONS));
 	Print(outfile);
