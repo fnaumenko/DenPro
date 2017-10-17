@@ -3,18 +3,19 @@
 #include "TxtFile.h"
 #include <algorithm>    // std::sort
 
-#ifndef _NO_HASHTABLE
+#ifndef _NO_UNODMAP
 #ifdef OS_Windows
 #include <unordered_map>
 #else
 #include <tr1/unordered_map>
 using namespace std::tr1;
 #endif
-#endif	// _NO_HASHTABLE
+#endif	// _NO_UNODMAP
 
 #define	CID(it)	(it)->first
 #define	TREATED(it)	(it)->second.Treated
 
+typedef pair<chrlen, chrlen> dchrlen;	// double chrlen
 
 // Sets common chromosomes as 'Treated' in both given objects.
 // Objects can be a different type, but both of them have to have secona field as Treated
@@ -33,43 +34,227 @@ chrid	SetCommonChroms(I& o1, J& o2, bool printAmbig)
 		if( TREATED(it) = o2.FindChrom(CID(it)) )
 			commCnt++;
 		else if( printAmbig )
-			Err(Chrom::Absent(CID(it), "second file"), StrEmpty).Warning();
+			Err(Chrom::Absent(CID(it), "second file"), strEmpty).Warning();
 	// set false treated chroms in second object
 	for(it = o2.Begin(); it != o2.End(); it++)
 		if( !o1.FindChrom(CID(it)) ) {
 			TREATED(it) = false;
 			if( printAmbig )
-				Err(Chrom::Absent(CID(it), "first file"), StrEmpty).Warning();
+				Err(Chrom::Absent(CID(it), "first file"), strEmpty).Warning();
 		}
 	return commCnt;
 }
 
+class ChromSizes;
+
+// Basic class for objects keeping in Tab File
 class Obj
 {
-protected:
-	bool _isBad;		// sign of invalidity
-	bool _EOLPrinted;	// true if EOL had been printing during initialization
+public:
+	enum eInfo {		// defines types of outputted info
+		iNONE,	// nothing printed: it is never pointed in command line
+		iLAC,	// laconic:		print file name if needs
+		iNM,	// name:		print file name
+		iEXT,	// standard:	print file name and items number
+		iSTAT,	// statistics:	print file name, items number and statistics
+	};
 
-		// Throws exception or warning message
-	//	@err: input exception
-	//	@abortInvalid: if true, throw exception, otherwise throw warning
-	void ThrowError(Err &err, bool abortInvalid)
-	{
-		_isBad = true;
-		if(abortInvalid)	throw err;
-		else	err.Throw(false, false);
-	}
+private:
+	// Throws exception or warning message
+	//	@err: input error
+	//	@abortInvalid: if true, throws exception, otherwise throws warning
+	void ThrowError(Err &err, bool abortInvalid);
 
 public:
-	inline Obj() : _isBad(false), _EOLPrinted(false) {}
+		// 'Ambig' handles items ambiguities and represents ambiguities statistics
+	class Ambig
+	{
+	public:
+		// Enum 'eCase' defines all possible ambiguous cases.
+		// Check _CasesCnt value
+		enum eCase	{
+			DUPL,		// duplicated features
+			CROSS,		// crossed features
+			ADJAC,		// adjacent features
+			COVER,		// coverage feature by another
+			SHORT,		// too short features
+			DIFFSZ,		// different size of reads
+			SCORE,		// filtered by score features
+			EXCEED,		// start or stop position exceeded chrom length
+			NEGL		// belong to negligible chromosome
+		};
 
+		// Enum 'eAction' defines all possible reactions for ambiguous.
+		enum eAction /*:BYTE*/ {	// commented type doesn't compiled under Linux GNU
+			ACCEPT,			// accept ambiguous feature/read "as is", without treatment
+			HANDLE,			// handle ambiguous feature/read
+			OMIT,			// omit ambiguous feature/read with alarm warning
+			OMIT_SILENT,	// omit ambiguous feature/read without alarm warning
+			ABORTING		// abort execution via exception
+		};
+
+	private:
+		// pointer to reaction
+		typedef int	(Obj::Ambig::*ReportCase)(eCase ambig);
+
+		struct Msg {
+			const char*	TotalAlarm;	// supplementary message, added to case message in statistics
+			const char*	StatInfo;	// short text of ambiguous used in statistics
+			const string LineAlarm;	// text of ambiguous used in line alarm
+		};
+		static Msg	_Msgs[];				// texts of all ambiguous
+		static const char*	_ActionMsgs[];	// messages followed by reactions
+		static const ReportCase	_Actions[];	// reactions
+		static const BYTE	_CasesCnt = 9;	// count of cases of feature/read ambiguities
+	
+		struct Case {
+			BYTE Type;
+			chrlen Count;
+		};
+		Case	_cases[_CasesCnt];
+		TabFile*	 _file;			// current reading file
+		const	FT::eTypes _fType;	// type of data
+		const	eInfo _info;		// input type of info
+		mutable chrlen _count;		// count of discovered ambiguous
+		const	bool _alarm;		// true if message should be printed
+		mutable bool _alarmPrinted;	// true if warning was printed
+#ifndef _ISCHIP
+		short	_treatcID;			// treated chrom ID: -1 initial, cID if only one chrom was treated.
+									// UnID if more then one chrom was treated
+#endif
+		// ***** treatment
+		inline int Accept(eCase ambg)	{ return 1; }
+		inline int Handle(eCase ambg)	{ PrintLineAlarm(ambg); return 0; }
+		inline int Omit  (eCase ambg)	{ PrintLineAlarm(ambg); return -1; }
+		inline int OmitQuiet(eCase ambg){ return -1; }
+		inline int Abort (eCase ambg)	{ ThrowExcept(_Msgs[ambg].LineAlarm); return -1; }
+
+		// Get treatment message 
+		const inline char* Message(eCase ambig) const { return _ActionMsgs[_cases[ambig].Type]; }
+		
+		inline const string& EntityName(chrlen cnt = 1) const { return FT::ItemTitle(_fType, cnt!=1); }
+
+		// Throws exception with given code, contained file name (if needed)
+		inline const void ThrowExcept (Err::eCode code)	const {	_file->ThrowLineExcept(code); }
+
+		// Throws exception with given message, contained file name (if needed)
+		inline const void ThrowExcept (const string& msg) const { _file->ThrowLineExcept(msg); }
+
+		// Gets count of ambiguities
+		chrlen Count() const;
+
+		// Prints entities count
+		//	@cID: readed chromosome's ID or Chrom::UnID if all
+		//	@cnt: number of entity
+		void PrintEntityCount(chrid cID, chrlen cnt) const;
+
+		// Print given ambiguity as alarm
+		//	@ambig: given ambiguity
+		void PrintLineAlarm(eCase ambig) const;
+
+		// Prints case statistics
+		//	@ambig: ambiguity's case
+		//	@allCnt: total count of ambiguities
+		//	@total: if true then prints total warning case
+		void PrintCaseStat(eCase ambig, chrlen allCnt, bool total=false) const;
+
+		// Prints items with specifying chrom
+		//	@cID: readed chromosome's ID or Chrom::UnID if all
+		//	@prAcceptItems: if true then prints number of accepted items
+		//	@itemCnt: count of accepted items after treatment
+		void PrintItems(chrid cID, bool prAcceptItems, long itemCnt) const;
+
+	public:
+		bool unsortedItems;		// true if items are unsorted
+
+		// Creates an instance with omitted COVER, SHORT, SCORE and NEGL cases;
+		// BedF cases by default:
+		// omitted DUPL cases and handled CROSS and ADJAC 
+		Ambig (eInfo info, bool alarm, FT::eTypes format,
+			eAction dupl = OMIT,
+			eAction crossANDadjac = HANDLE,
+			eAction diffsz = ACCEPT	// in fact for BedF it even doesn't check
+		);
+
+		// Sets current Tab File
+		inline void SetFile (TabFile& file) { _file = &file; }
+		
+		// Gets current Tab File
+		inline TabFile& File () const		{ return *_file; }
+
+		inline FT::eTypes FileType() const	{ return _fType; }
+
+		inline bool IsAlarmPrinted() const	{ return _alarmPrinted; }
+#ifndef _ISCHIP
+		// Remember treated chrom.
+		void	SetTreatedChrom(chrid cid);
+
+		// Gets treated chrom: cID if only one chrom was treated, UnID otherwise.
+		void KeepTreatedChrom() const { if(_treatcID != vUNDEF)	Chrom::SetStatedID(chrid(_treatcID)); }
+#endif
+		// Initializes given Region by second and third current reading line positions, with validating
+		//	@rgn: Region that should be initialized
+		//	@cLen: chrom lemgth
+		//	return: true if Region was initialized successfully
+		bool InitRegn(Region& rgn, chrlen cLen);
+
+		// Adds statistics and print given ambiguity as alarm (if permitted)
+		//	@ambig: given ambiguity
+		//	return: treatment code: 1 - accept, 0 - handle, -1 - omit
+		int TreatCase(eCase ambig);
+
+		// Prints statistics.
+		//	@cID: readed chromosome's ID or Chrom::UnID if all
+		//	@title: string at the beginning; if NULL then this instance is used while initialization
+		//	and don't feeds line
+		//	@totalItemCnt: count of all items
+		//	@acceptItemCnt: count of accepted items after treatment
+		//	return: true if EOL has been printed
+		bool Print(chrid cID, const char* title, ULONG totalItemCnt, ULONG acceptItemCnt);
+
+		// Sets supplementary message, added to case message in statistics
+		//	@ambig: given case
+		//	@msg: supplementary message
+		static inline void SetSupplAlarm(eCase ambig, const char* msg) {
+			_Msgs[ambig].TotalAlarm = msg;
+		}
+	};	//***** end of class Ambig
+
+	bool _isBad;		// sign of invalidity
+	bool _EOLneeded;	// true if EOL 
+
+	inline Obj() : _isBad(false), _EOLneeded(false) {}
+
+	// Initializes new instance by tab file name.
+	//	@title: title printed before file name
+	//	@fName: name of file
+	//	@ambig: ambiguities
+	//	@addObj: auxiliary object using while initializing
+	//	@isInfo: true if file info hpuld be printed
+	//	@abortInvalid: true if invalid instance shold be completed by throwing exception
+	void Init	(const char* title, const string& fName, Ambig& ambig, void* addObj,
+		bool isInfo, bool abortInvalid);
+
+	// Initializes child instance from tab file
+	//	@ambig: ambiguities
+	//	@addObj: auxiliary object
+	//	return: numbers of all and initialied items for given chrom
+	virtual dchrlen InitChild	(Ambig& ambig, void* addObj) = 0;
+
+	// Gets item's title.
+	//	@pl: true if plural form
+	virtual const string & ItemTitle(bool pl=false) const = 0;
+
+	// Prints EOL if needs.
+	//	@printEOL: true if EOL should be printed
+	void PrintEOL(bool printEOL);
+
+public:
 	// Returns true if instance is invalid.
 	inline bool IsBad()	const { return _isBad; }
 
-	// Returns true if additional info with EOL had been printing
-	// during initialization (statistisc or alarms)
-	inline bool EOLPrinted() const { return _EOLPrinted; }
-
+	// Returns true if something was printed during initialization without EOL
+	inline bool EOLNeeded() const { return _EOLneeded; }
 };
 
 static const string range_out_msg = "Chroms[]: invalid chrom ID ";
@@ -80,7 +265,7 @@ template <typename T> class Chroms
  */
 {
 protected:
-#ifdef _NO_HASHTABLE
+#ifdef _NO_UNODMAP
 	typedef pair<chrid,T> chrItem;
 	typedef vector<chrItem> chrItems;
 
@@ -89,7 +274,7 @@ protected:
 	}
 #else
 	typedef unordered_map<chrid, T> chrItems;
-#endif	// _NO_HASHTABLE
+#endif	// _NO_UNODMAP
 
 private:
 	chrItems _chroms;	// storage of chromosomes
@@ -112,7 +297,7 @@ protected:
 	// Reserves container's capacity
 	inline void Reserve (chrid cCnt) {
 		if( cCnt > 1 )
-		#ifdef _NO_HASHTABLE
+		#ifdef _NO_UNODMAP
 			_chroms.reserve(cCnt);
 		#else
 			_chroms.rehash(cCnt);
@@ -121,44 +306,44 @@ protected:
 
 	// Returns reference to the chromosome's item at its ID
 	inline const T & At(chrid cID) const {
-	#ifdef _NO_HASHTABLE
+	#ifdef _NO_UNODMAP
 		cIter it = GetIter(cID);
 		if( it == cEnd() )
 			throw std::out_of_range (range_out_msg + BSTR(cID));
 		return it->second;
 	#else
 		return _chroms.at(cID);
-	#endif	// _NO_HASHTABLE
+	#endif	// _NO_UNODMAP
 	}
 
 	inline T & At(chrid cID) {
-	#ifdef _NO_HASHTABLE
+	#ifdef _NO_UNODMAP
 		Iter it = GetIter(cID);
 		if( it == End() )
 			throw std::out_of_range (range_out_msg + BSTR(cID));
 		return it->second;
 	#else
 		return _chroms.at(cID);
-		//return _chroms[cID];
-	#endif	// _NO_HASHTABLE
+		//return _chroms[cID];	// inserts a new element if cID does not match the key of any element
+	#endif	// _NO_UNODMAP
 	}
 
 	// Sorts container if possible
 	inline void Sort() {
-	#ifdef _NO_HASHTABLE
+	#ifdef _NO_UNODMAP
 		sort(Begin(), End(), Compare);
-	#endif	// _NO_HASHTABLE
+	#endif	// _NO_UNODMAP
 	}
 
 	// Adds empty class type to the collection without checking cID
 	//	return: class type collection reference
 	T& AddEmptyClass(chrid cID) {
-	#ifdef _NO_HASHTABLE
+	#ifdef _NO_UNODMAP
 		_chroms.push_back( chrItem(cID, T()) );
 		return (_chroms.end()-1)->second;
 	#else
 		return _chroms[cID];
-	#endif	// _NO_HASHTABLE
+	#endif	// _NO_UNODMAP
 	}
 
 	// Adds class type to the collection without checking cID.
@@ -172,25 +357,25 @@ public:
 	// Searches the container for an chromosome cID and returns an iterator to it if found,
 	// otherwise it returns an iterator to end (the element past the end of the container)
 	Iter GetIter(chrid cID) {
-	#ifdef _NO_HASHTABLE
+	#ifdef _NO_UNODMAP
 		for(Iter it = Begin(); it != End(); it++)
 			if( it->first == cID )	return it;
 		return End();
 	#else
 		return _chroms.find(cID);
-	#endif	// _NO_HASHTABLE
+	#endif	// _NO_UNODMAP
 	}
 
 	// Searches the container for an chromosome cID and returns a constant iterator to it if found,
 	// otherwise it returns an iterator to cEnd (the element past the end of the container)
 	const cIter GetIter(chrid cID) const {
-	#ifdef _NO_HASHTABLE
+	#ifdef _NO_UNODMAP
 		for(cIter it = cBegin(); it != cEnd(); it++)
 			if( it->first == cID )	return it;
 		return cEnd();
 	#else
 		return _chroms.find(cID);
-	#endif	// _NO_HASHTABLE
+	#endif	// _NO_UNODMAP
 	}
 
 	// Returns count of chromosomes.
@@ -198,27 +383,27 @@ public:
 
 	// Adds value type to the collection without checking cID
 	inline void AddVal(chrid cID, const T & val) {
-	#ifdef _NO_HASHTABLE
+	#ifdef _NO_UNODMAP
 		_chroms.push_back( chrItem(cID, val) );
 	#else
 		_chroms[cID] = val;
-	#endif	// _NO_HASHTABLE
+	#endif	// _NO_UNODMAP
 	}
 
 	// Clear content
 	inline void Clear() {
 		_chroms.clear();
-	//#ifdef _NO_HASHTABLE
+	//#ifdef _NO_UNODMAP
 	//	_chroms.clear();
 	//	_chroms.push_back( chrItem(cID, val) );
 	//#else
 	//	_chroms.clear();
-	//#endif	// _NO_HASHTABLE
+	//#endif	// _NO_UNODMAP
 	}
 
 	// Insert value type to the collection: adds new value or replaces existed
 	//void InsertVal(chrid cID, const T & val) {
-	//#ifdef _NO_HASHTABLE
+	//#ifdef _NO_UNODMAP
 	//	for(Iter it = Begin(); it != End(); it++)
 	//		if( it->first == cID ) {
 	//			it->second = val;
@@ -227,13 +412,13 @@ public:
 	//	_chroms.push_back( chrItem(cID, val) );
 	//#else
 	//	_chroms[cID] = val;
-	//#endif	// _NO_HASHTABLE
+	//#endif	// _NO_UNODMAP
 	//}
 
 	// Insert class type to the collection: adds new value or replaces existed
 	//	returns: iterator to the value
 	//Iter InsertClass(chrid cID, const T & val) {
-	//#ifdef _NO_HASHTABLE
+	//#ifdef _NO_UNODMAP
 	//	for(Iter it = Begin(); it != End(); it++)
 	//		if( it->first == cID ) {
 	//			it->second = val;
@@ -244,24 +429,24 @@ public:
 	//	return _chroms.end()-1;	// insert class member
 	//#else
 	//	_chroms[cID] = val;
-	//#endif	// _NO_HASHTABLE
+	//#endif	// _NO_UNODMAP
 	//}
 	
 	// Returns true if chromosome cID exists in the container, and false otherwise.
 	bool FindChrom	(chrid cID) const {
-	#ifdef _NO_HASHTABLE
+	#ifdef _NO_UNODMAP
 		for(cIter it = cBegin(); it != cEnd(); it++)
 			if( it->first == cID )	
 				return true;
 		return false;
 	#else
 		return _chroms.count(cID) > 0;
-	#endif	// _NO_HASHTABLE
+	#endif	// _NO_UNODMAP
 	}
 };
 
+// 'ChromItemsInd' representes a range of chromosome's features/reads indexes,
 struct ChromItemsInd
-// 'ChromItemsInd' representes a range of chromosome's features/reads indexes.
 {
 	bool	Treated;
 	chrlen	FirstInd;	// first index in Feature's/Read's container
@@ -274,8 +459,6 @@ struct ChromItemsInd
 	inline size_t ItemsCount() const { return LastInd - FirstInd + 1; }
 };
 
-class ChromSizes;
-
 class Bed : public Obj, public Chroms<ChromItemsInd>
 /*
  * Basic abstract class 'Bed' implements methods for creating list of chromosomes from bed-file.
@@ -284,178 +467,15 @@ class Bed : public Obj, public Chroms<ChromItemsInd>
  * strongly needs keyword 'abstract' but it doesn't compiled by GNU g++
  */
 {
-private:
+protected:
 	static const BYTE _FieldsCnt = 6;	// count of fields readed from file
 
 public:
-	enum eInfo {	// defines types of bed featur ambiguity outputted info
-		iOFF = 0,	// not printed: it is never pointed in command line
-		iNOTE = 1,	// notice should be printed
-		iSTAT = 2,	// statistics should be printed
-	};
-
-
-	class Ambig
-	/*
-	 * class 'Ambig' handles features/reads ambiguities and represents ambiguities statistics
-	 */
-	{
-	public:
-		// Enum 'eCase' defines all possible ambiguous cases.
-		// Check _CasesCnt value
-		enum eCase	{
-			DUPL,		// duplicated features
-			CROSS,		// crossed features
-			ADJAC,		// adjacent features
-			COVER,		// coverage feature by another
-			SHORT,		// too short features
-			DIFFSZ,		// different size of reads
-			SCORE,		// filtered by score features
-			NEGL		// belong to negligible chromosome
-		};
-		// Enum 'eAction' defines all possible reactions for ambiguous.
-		enum eAction /*:BYTE*/ {	// commented type doesn't compiled under Linux GNU
-			ACCEPT,		// accept ambiguous feature/read "as is", without treatment
-			HANDLE,		// handle ambiguous feature/read
-			OMIT,		// omit ambiguous feature/read with alarm warning
-			OMIT_SILENT,// omit ambiguous feature/read without alarm warning
-			ABORT		// abort execution via exception
-		};
-
-	private:
-		// pointer to reaction
-		typedef int	(Bed::Ambig::*ReportCase)(eCase ambig);
-
-		struct Msg {
-			const char*	TotalAlarm;	// additional specializing text setting by application
-			const char*	StatInfo;	// short text of ambiguous used in statistics
-			const string LineAlarm;	// text of ambiguous used in line alarm
-		};
-		static Msg	_Msgs[];		// texts of all ambiguous
-		static const char*	_ActionMsgs[];	// messages followed by reactions
-		static const ReportCase	_Actions[];		// reactions
-		static const BYTE	_CasesCnt = 8;	// count of cases of feature/read ambiguities
-	
-		bool _alarm;				// true if message should be printed
-		bool _printFileName;		// true if file name in warnings should be printed
-		bool _unsortedItems;		// true if items are unsorted
-		mutable bool _firstAlarm;	// true if printed first warning
-		mutable bool _infoPrinted;	// true if additional info has been printed
-									// during initialization, such as statistisc or alarms
-		struct Case {
-			BYTE Type;
-			chrlen Count;
-		};
-		Case	_cases[_CasesCnt];
-		mutable chrlen	_count;		// count of discovered ambiguous
-		const string& _entityName;	// 'Read' or 'Feature'
-		const TxtFile*	 _file;		// current reading file
-
-		// ***** reactions
-		int Accept(eCase ambig)	{ return 1; }
-		int Handle(eCase ambig)	{ PrintLineAlarm(ambig); return 0; }
-		int Omit(eCase ambig)	{ PrintLineAlarm(ambig); return -1; }
-		int OmitQuiet(eCase ambig)	{ return -1; }
-		int Abort(eCase ambig)	{ Err(_Msgs[ambig].LineAlarm, FileRecordNumb()).Throw();  return -1; }
-
-		// Get action 
-		const inline char* Message(eCase ambig) const { return _ActionMsgs[_cases[ambig].Type]; }
-		// Prints entity name(s)
-		//	@cnt: number of entity
-		void PrintEntityName(chrlen cnt) const;
-
-		// Prints entities count
-		//	@cID: readed chromosome's ID or Chrom::UnID if all
-		//	@cnt: number of entity
-		void PrintEntityCount(chrid cID, chrlen cnt) const;
-
-		// Print given ambiguity as alarm
-		//	@ambig: given ambiguity
-		void PrintLineAlarm(eCase ambig) const;
-
-		// Prints case statistics
-		//	@ambig: ambiguity's case
-		//	@allCnt: total count of ambiguities
-		//	@total: if true then prints total warning case
-		void PrintCaseStat(eCase ambig, chrlen allCnt, bool total=false) const;
-
-	public:
-		static inline void SetTotalAlarm(eCase ambig, const char* msg) {
-			_Msgs[ambig].TotalAlarm = msg;
-		}
-
-		// Creates an instance with omitted COVER, SHORT, SCORE and NEGL cases;
-		// BedF cases by default:
-		// omitted DUPL cases and handled CROSS and ADJAC 
-		Ambig (bool alarm, bool printFileName, const string& entityName,
-			eAction dupl = OMIT,
-			eAction crossANDadjac = HANDLE,
-			eAction diffsz = ACCEPT	// in fact for BedF it even doesn't check
-		);
-
-		inline void SetFile (const TxtFile & file) { _file = &file; }
-		
-		inline bool PrintFileName() const { return _printFileName; }
-
-		inline bool UnsortedItems() const { return _unsortedItems; }
-
-		inline void ItemsAreUnsorted() { _unsortedItems = true; }
-
-		// Gets string containing file name (if needed) and current record number
-		inline const string FileRecordNumb () const
-		{ 	return _file->RecordNumbToStr(!_printFileName); }
-
-		// Throws exception with pointed code, contained file name (if needed)
-		// and current record number
-		inline const void ThrowExcept (Err::eCode code) const
-		{ Err(code, FileRecordNumb()).Throw(); }
-
-		// Adds statistics and print given ambiguity as alarm (if permitted)
-		//	@ambig: given ambiguity
-		//	return: treatment code: 1 - accept, 0 - handle, -1 - omit
-		int TreatCase(eCase ambig);
-
-		// Returns true if additional info with EOL has been printed
-		// during initialization (statistisc or alarms)
-		inline bool IsAddInfoPrinted() const { return _infoPrinted; }
-
-		// Gets count of ambiguities
-		chrlen AmbigCount() const;
-
-		// Prints statistics.
-		//	@cID: readed chromosome's ID or Chrom::UnID if all
-		//	@title: string at the beginning
-		//	@printItemCnt: if true then print count of items
-		//	@itemCnt: count of all items (features/reads) from file
-		//	@savedItemCnt: count of saved items (features/reads)
-		void PrintStatistics(chrid cID, const char* title,
-			bool printItemCnt, chrlen itemCnt, chrlen savedItemCnt);
-
-		// Prints total warning if some ambiguous are occurs
-		//	@printFull: true if full info should be printed; otherwise count of items only
-		//	@cID: readed chromosome's ID or Chrom::UnID if all
-		//	@printItemCnt: if true then print count of items
-		//	@itemCnt: count of all items (features/reads) from file
-		void PrintInfo(bool printFull, chrid cID, bool printItemCnt, chrlen itemCnt) const;
-
-	};	//***** end of class Ambig
-
-	// Gets item's title.
-	//	@plural: true if plural form
-	virtual const string & ItemTitle(bool plural = false) const = 0;
-
-	// Initializes new instance by bed-file name.
-	// We cannot implemet it in constructor because of overriding methods of derived class:
-	// base object is creating while derived object doesn't exist yet.
-	//	@fName: name of bed-file
-	//	@ambig: ambiguous filters
-	//	@cSizes: chrom sizes to control the chrom length exceedeng; if NULL, no control
-	//	@abortInvalid: true if invalid instance shold be completed by throwing exception
-	//	@info: type of feature ambiguties that should be printed
-	//	@printItemCnt: if true then print count of items
-	//	@return: count of features/reads in file
-	ULONG Init(const string & fName, Ambig& ambig, const ChromSizes* cSizes,
-		bool abortInvalid, eInfo info, bool printItemCnt);
+	// Initializes instance from tab file
+	//	@ambig: ambiguities
+	//	@cSizes: chrom sizes
+	//	return: numbers of all and initialied items for given chrom
+	dchrlen InitChild	(Ambig& ambig, void* cSizes);
 	 
 	// Initializes size of positions container.
 	virtual void ReserveItemContainer(ULONG initSize) = 0;
@@ -469,14 +489,17 @@ public:
 	//  return: false if some ambiguous has found; true if alright
 	virtual bool CheckLastPos(const Region& rgn, Ambig& ambig) = 0;
 
-	// Adds item to the container
-	virtual bool AddPos(const Region& rgn, const char* name, float score, const char* strand) = 0;
+	// Adds Read to the container.
+	//	@rgn: Region with mandatory fields
+	//	@file: file to access to additionally fields
+	//	return: true if Read was added successfully
+	virtual bool AddPos(const Region& rgn, TabFile& file) = 0;
 
 	// Sorts and rechecks items for the ambiguities.
 	//	@ambig:  ambiguous filters
 	virtual void SortItems(Ambig& ambig) = 0;
 
-	// Sets count of all Features/Reads.
+	// Sets and returns count of all Features/Reads.
 	virtual void SetAllItemsCount() = 0;
 
 	// Gets count of Features/Reads for chromosome
@@ -532,9 +555,6 @@ public:
 private:
 	// Initializes size of positions container.
 	inline void ReserveItemContainer(ULONG size) { _items.reserve(size); }
-
-	// Sets count of all features/reads.
-	virtual void SetAllItemsCount()	{ _itemsCnt = _items.size(); }
 
 	// Checks the element for the new potential start/end positions for all possible ambiguous.
 	//	@it: iterator reffering to the compared element
@@ -601,29 +621,32 @@ protected:
 	//inline vector<I>* ItemsPoint() const { return &_items; };
 	//inline BYTE	SizeOfItem() const { return sizeof(I); }
 
-	// Returns a constan iterator referring to the first item of pointed chrom
+	// Returns a constan iterator referring to the first item of specified chrom
 	//	@cit: chromosome's constant iterator
 	inline const cItemsIter cItemsBegin(cIter cit) const {
 		return _items.begin() + cit->second.FirstInd; 
 	}
 
-	// Returns a constant iterator referring to the past-the-end item of pointed chrom
+	// Returns a constant iterator referring to the past-the-end item of specified chrom
 	//	@cit: chromosome'sconstant  iterator
 	inline const cItemsIter cItemsEnd(cIter cit) const { 
 		return _items.begin() + cit->second.LastInd + 1;
 	}
 
-	// Returns an iterator referring to the first item of pointed chrom
+	// Returns an iterator referring to the first item of specified chrom
 	//	@cit: chromosome's constant iterator
 	inline const ItemsIter ItemsBegin(cIter cit) {
 		return _items.begin() + cit->second.FirstInd; 
 	}
 
-	// Returns an iterator referring to the past-the-end item of pointed chrom
+	// Returns an iterator referring to the past-the-end item of specified chrom
 	//	@cit: chromosome's constant iterator
 	inline const ItemsIter ItemsEnd(cIter cit) { 
 		return _items.begin() + cit->second.LastInd + 1;
 	}
+
+	// Sets count of all features/reads.
+	virtual void SetAllItemsCount()	{ _itemsCnt = _items.size(); }
 
 	// Gets count of all features/reads.
 	inline size_t AllItemsCount() const { return _itemsCnt; }
@@ -659,9 +682,6 @@ class BedR : public BedType<Read>
  */
 {
 private:
-	static const string	_ItemTitle;
-	static const string	_ItemTitles;
-
 	readlen	_readLen;			// length of Read
 	int		_minScore;			// score threshold: Reads with score <= _minScore are skipping
 	readscr	_maxScore;			// maximum score along Reads
@@ -669,12 +689,6 @@ private:
 	Read::rNameType	_rNameType;		// type of Read name
 	bool		_paired;		// true if Reads are paired-end
 #endif
-	// Gets an item's title
-	//	@plural: true if plural form
-	inline const string& ItemTitle(bool plural = false) const
-	{	return plural ? _ItemTitles : _ItemTitle; };
-
-
 	// Gets a copy of region by container iterator.
 	inline Region const Regn(cItemsIter it) const { return Region(it->Pos, it->Pos + _readLen); }
 
@@ -686,8 +700,10 @@ private:
 	bool CheckItemPos(ItemsIter it, const Region& rgn, Ambig& ambig);
 
 	// Adds Read to the container.
+	//	@rgn: Region with mandatory fields
+	//	@file: file to access to additionally fields
 	//	return: true if Read was added successfully
-	bool AddPos(const Region& rgn, const char* name, float score, const char* strand);
+	bool AddPos(const Region& rgn, TabFile& file);
 
 	// Decreases Read's start position without checkup indexes.
 	//	@cID: chromosome's ID
@@ -698,39 +714,31 @@ private:
 	//bool DecreasePos(chrid cID, chrlen rInd, chrlen shift, chrlen rgEnd);
 
 public:
-	// Gets Read printed name.
-	//	@plural: true if plural
-	inline static const string& ReadTitle(bool plural = false)
-	{	return plural ? _ItemTitles : _ItemTitle; };
-
 	// Creates new instance from bed-file with output info.
 	// Invalid instance will be completed by throwing exception.
-	//	@title: string printed before file name or NULL
+	//	@title: title printed before file name or NULL
 	//	@fName: name of bed-file
 	//	@cSizes: chrom sizes to control the chrom length exceedeng; if NULL, no control
-	//	@printfName: true if file name should be printed
-	//	@abortInvalid: true if invalid instance should abort excecution
 	//	@info: type of feature ambiguties that should be printed
+	//	@absolPrintfName: true if file name should be printed absolutely, otherwise deneds on info
+	//	@abortInvalid: true if invalid instance should abort excecution
 	//	@alarm: true if warning messages should be printed 
-	//	@printItemCnt: true if number of readed features should be printed
 	//	@acceptDupl: true if duplicates are acceptable 
-	//	@ignoreDiffSize: true if reads with different size should be ignored indtead of aborting
 	//	@minScore: score threshold (Reads with score <= minScore are skipping)
-	BedR(const char* title, const string& fName, const ChromSizes* cSizes, bool printfName, 
-		bool abortInvalid, eInfo info, bool alarm, bool printItemCnt=true,
-		bool acceptDupl=true, bool ignoreDiffSize=false, int minScore=vUNDEF )
+	BedR(const char* title, const string& fName, const ChromSizes* cSizes, eInfo info,
+		bool absolPrintfName, bool abortInvalid, bool alarm, bool acceptDupl=true, int minScore=vUNDEF )
 		: _readLen(0), _minScore(minScore)
 #ifdef _BEDR_EXT
 		, _rNameType(Read::nmUndef), _paired(false), _maxScore(0)
 #endif
 	{ 
-		Ambig ambig(alarm, printfName, _ItemTitle,
+		Ambig ambig(info, alarm, FT::ABED,
 			acceptDupl ? Ambig::ACCEPT : Ambig::OMIT_SILENT,	// duplicated reads
-			Ambig::ACCEPT,				// crossed & adjacent reads: typical
-			ignoreDiffSize ? Ambig::OMIT : Ambig::ABORT
+			Ambig::ACCEPT,		// crossed & adjacent reads: typical
+			//ignoreDiffSize ? Ambig::OMIT : Ambig::ABORTING
+			Ambig::OMIT			// different Read size
 		);
-		if(title) {	dout << title; fflush(stdout); }
-		Init(fName, ambig, cSizes, abortInvalid, info, printItemCnt);
+		Init(title, fName, ambig, const_cast<ChromSizes*>(cSizes), info > iLAC || absolPrintfName, abortInvalid);
 	}
 
 #ifdef _BEDR_EXT
@@ -741,6 +749,9 @@ public:
 	// Gets maximum score
 	inline readscr MaxScore()		const { return _maxScore; }
 #endif
+	// Gets an item's title
+	//	@pl: true if plural form
+	inline const string& ItemTitle(bool pl = false) const { return FT::ItemTitle(FT::ABED, pl); };
 
 	// Gets length of Read.
 	inline readlen ReadLen()		const { return _readLen; }
@@ -795,16 +806,15 @@ class BedF : public BedType<Featr>
  */
 {
 private:
-	static const string	_ItemTitle;
-	static const string	_ItemTitles;
+	static const BYTE _MinFieldsCnt = 3;	// minimum count of fields readed from file
 
 #ifdef _ISCHIP
 	readlen	_minFtrLen;		// minimal length of feature
 	float	_maxScore;		// maximal feature score after reading
 #elif defined _BIOCC
 	// these vars needed to get warning if user call BedR instead of BedF (without -a option)
-	chrlen	_ftrLen;		// feature's length
-	bool	_uniformFtrLen;	// true if all features have the same length
+	long	_fLen;		// feature's length. 'long' since we compare the difference with Read length
+	bool	_unifLen;	// true if all features have the same length
 #endif	// _ISCHIP
 
 	// Sets new end position on the feature if necessary.
@@ -815,9 +825,8 @@ private:
 	bool CorrectItemsEnd(ItemsIter it, chrlen end, int treatCaseRes);
 
 	// Gets item's title
-	//	@plural: true if plural form
-	inline const string& ItemTitle(bool plural=false) const
-	{	return plural ? _ItemTitles : _ItemTitle; };
+	//	@pl: true if plural form
+	inline const string& ItemTitle(bool pl=false) const	{ return FT::ItemTitle(FT::BED, pl); }
 	
 	// Gets a copy of Region by container iterator.
 	inline Region const Regn(cItemsIter it) const { return *it; }
@@ -830,8 +839,10 @@ private:
 	bool CheckItemPos(ItemsIter it, const Region& rgn, Ambig& ambig);
 
 	// Adds feature to the container
+	//	@rgn: Region with mandatory fields
+	//	@file: file file to access to additionally fields
 	//	return: true if Read was added successfully
-	bool AddPos(const Region& rgn, const char* name, float score, const char* strand);
+	bool AddPos(const Region& rgn, TabFile& file);
 
 #ifdef _ISCHIP
 	// Scales defined score through all features to the part of 1.
@@ -846,47 +857,42 @@ private:
 	//bool DecreasePos(chrid cID, chrlen fInd, chrlen shift, chrlen rgEnd);
 
 public:
-	// Gets feature title.
-	//	@plural: true if plural form
-	inline static const string& FeatureTitle(bool plural = false) 
-	{	return plural ? _ItemTitles : _ItemTitle; };
-
 #ifdef _ISCHIP
 	// Creates new instance by bed-file name
 	// Invalid instance wil be completed by throwing exception.
+	//	@title: title printed before file name or NULL
 	//	@fName: file name
 	//	@cSizes: chrom sizes to control the chrom length exceedeng; if NULL, no control
-	//	@printfName: true if file name should be printed
-	//	@bsLen: length of binding site: shorter features would be omitted
 	//	@info: type of feature ambiguties that should be printed
+	//	@absolPrintfName: true if file name should be printed absolutely, otherwise deneds on info
+	//	@bsLen: length of binding site: shorter features would be omitted
 	//	@alarm: true if info about ambiguous lines is printed during initialization
-	//	@printItemCnt: true if number of readed features should be printed
-	BedF(const string& fName, const ChromSizes* cSizes, bool printfName,
-		readlen bsLen, eInfo info, bool alarm, bool printItemCnt)
+	BedF(const char* title, const string& fName, const ChromSizes* cSizes, eInfo info,
+		bool absolPrintfName, readlen bsLen, bool alarm)
 		: _minFtrLen(bsLen), _maxScore(vUNDEF)
 	{
-		Ambig ambig(alarm, printfName, _ItemTitle);
-		Init(fName, ambig, cSizes, true, info, printItemCnt);
+		Ambig ambig(info, alarm, FT::BED);
+		Init(title, fName, ambig, const_cast<ChromSizes*>(cSizes), info > iLAC || absolPrintfName, true);
 		ScaleScores();
 	}
 #else
 	// Creates new instance by bed-file name
 	// Invalid instance will be completed by throwing exception.
+	//	@title: title printed before file name or NULL
 	//	@fName: name of bed-file
 	//	@cSizes: chrom sizes to control the chrom length exceedeng; if NULL, no control
-	//	@printfName: true if file name should be printed
-	//	@abortInvalid: true if invalid instance should abort excecution
 	//	@info: type of feature ambiguties that should be printed
+	//	@absolPrintfName: true if file name should be printed absolutely, otherwise deneds on info
+	//	@abortInvalid: true if invalid instance should abort excecution
 	//	@alarm: true if warning messages should be printed 
-	//	@printItemCnt: true if number of readed features should be printed
-	BedF(const string& fName, const ChromSizes* cSizes, bool printfName, 
-		bool abortInvalid, eInfo info, bool alarm, bool printItemCnt = true)
+	BedF(const char* title, const string& fName, const ChromSizes* cSizes, eInfo info,
+		bool absolPrintfName, bool abortInvalid, bool alarm)
 #ifdef _BIOCC
-		: _ftrLen(0), _uniformFtrLen(true)
+		: _fLen(0), _unifLen(true)
 #endif
 	{
-		Ambig ambig(alarm, printfName, _ItemTitle);
-		Init(fName, ambig, cSizes, abortInvalid, info, printItemCnt);
+		Ambig ambig(info, alarm, FT::BED);
+		Init(title, fName, ambig, const_cast<ChromSizes*>(cSizes), info > iLAC || absolPrintfName, abortInvalid);
 	}
 #endif	//  _ISCHIP
 	
@@ -925,11 +931,14 @@ public:
 		return FeaturesTreatLength(GetIter(cID), multiplier, fLen);
 	}
 
-	// Expands or shrinks all features positions on the fixed length in both directions.
+	// Expands all features positions on the fixed length in both directions.
+	// If extended feature starts from negative, or ends after chrom length, it is fitted.
 	//	@extLen: distance on which Start should be decreased, End should be increased,
 	//	or inside out if it os negative
-	//	@printStats: true if statistics should be outputted
-	void Extend(int extLen, bool printStats=false);
+	//	@cSizes: chrom sizes
+	//	@info: displayed info
+	//	return: true if positions have been changed
+	bool Extend(int extLen, const ChromSizes* cSizes, eInfo info);
 
 	// Checks whether all features length exceed gien length, throws exception otherwise.
 	//	@len: given control length
@@ -966,7 +975,9 @@ public:
 
 #ifdef _BIOCC
 	// Returns true if all features have the same length
-	inline bool	SameFeaturesLength() const { return _uniformFtrLen; }
+	inline bool	SameFeaturesLength() const { 
+		return _unifLen; 
+	}
 
 	friend class JointedBeds;	// to access GetIter(chrid)
 #endif
@@ -1019,7 +1030,7 @@ public:
 	inline Nts (const string& fName, short minGapLen, bool letN)
 	{ Init(fName, minGapLen, false, letN); }
 
-	inline ~Nts()	{ if(_nts) delete [] _nts; }
+	inline ~Nts()	{ if(_nts) { delete [] _nts; _nts = NULL; } }
 
 	// Gets Read on position or NULL if the rest is shorter than Read length
 	const char* Read(const chrlen pos) const { 
@@ -1091,7 +1102,7 @@ private:
 	string	_path;			// files path
 	string	_prefixName;	// common prefix of file names
 	string	_ext;			// files extention
-	bool	_extractAll;		// true if all chromosomes should be extracted. Used in imitator only
+	bool	_extractAll;	// true if all chromosomes should be extracted. Used in imitator only
 
 	// Returns length of common prefix before abbr chrom name of all file names
 	//	@fName: full file name
@@ -1170,7 +1181,7 @@ private:
 	//mutable chrlen _minsize;	// minimal size of chromosome
 //#endif	// _BIOCC
 
-#ifndef _NO_HASHTABLE
+#ifndef _NO_UNODMAP
 	// typedef and SizeCompare are needed for temporary sorting elements before saving to file
 	typedef pair<chrid,chrlen> cSize;
 

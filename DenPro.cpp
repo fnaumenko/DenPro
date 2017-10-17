@@ -19,52 +19,49 @@ const string Product::Title = "DenPro";
 const string Product::Version = "1.0";
 const string Product::Descr = "Density Profile";
 
-const string OutFile = string(Product::Title) +  "_out.txt";
+const string OutFile = Product::Title +  "_out.txt";
 const string HelpOutFile = "duplicate standard output to " + OutFile + " file";
-const string Alignment = "alignment";
 
 enum eOptGroup	{ oINPUT, oTREAT, oOUTPUT, oOTHER };	// oOTHER should be the last 
 const BYTE	Options::_GroupCount = oOTHER + 1;
 
-const char* Options::_OptGroups [] = {
-	"Input", "Treatment", "Output", "Other"
-};
+const char* Options::_OptGroups [] = { "Input", "Treatment", "Output", "Other" };
 
 // --info option: types of info notations
-const char* infos [] = { "NOTE", "STAT" };	// corresponds to eInfo; iOFF is hidden
+const char* infos [] = { "NM", "CNT", "STAT" };	// corresponds to eInfo; iNONE and iLAC are hidden
 
-//	{ char,	str,	Signs,	type,	group,	defVal,	minVal,	maxVal,	strVal,	descr }
+//	{ char,	str,	Signs,	type,	group,	defVal,	minVal,	maxVal,	strVal,	descr, addDescr }
 // field 7: vUNDEF if value is prohibited
 // field 6: vUNDEF if no default value should be printed
 Options::Option Options::_Options [] = {
 	{ 'g', "gen",	1,	tNAME,	oINPUT, vUNDEF, 0, 0, NULL,
-	"chromosome sizes file, reference genome library,\nor single nucleotide sequence. Required" },
+	"chromosome sizes file, reference genome library,\nor single nucleotide sequence.", NULL },
 	{ HPH,"gap-len",0,	tINT,	oINPUT, 1000, 10, 100000, NULL,
-	"minimal length of undefined nucleotides region in genome\nwhich is declared as a gap.\nIgnored for genome size file" },
+	"minimal length of undefined nucleotides region in genome\nwhich is declared as a gap. Ignored for the genome size file", NULL },
 	{ 'd', "dupl",	0,	tENUM,	oINPUT, TRUE,	0, 2, (char*)Options::Booleans,
-	"accept duplicate reads" },
-	{ HPH, "diff-sz",	0,	tENUM,	oINPUT, FALSE,	0, 2, (char*)Options::Booleans,
-	"allow to ignore reads with different size" },
+	"accept duplicate reads", NULL },
+	//{ HPH, "diff-sz",	0,	tENUM,	oINPUT, FALSE,	0, 2, (char*)Options::Booleans,
+	//"allow to ignore reads with different size", NULL },
 	{ 'c', Chrom::Abbr,	0,	tCHAR,	oTREAT, vUNDEF, 0, 0, NULL,
-	"treat specified chromosome only (all)" },
+	"treat specified chromosome only", NULL },
 	{ HPH, "min-scr",	0,	tINT,	oTREAT, vUNDEF, 0, 1000, NULL,
-	"score threshold for treated reads (lack)" },
+	"score threshold for treated reads", NULL },
 	{ HPH, "cons",	0,	tINT,	oTREAT, vUNDEF, 2, 500, NULL,
-	"step of number of consolidated reads" },
+	"step of number of consolidated reads", NULL },
 	{ 'f', "fbed",	0,	tNAME,	oTREAT, vUNDEF,	0, 0, NULL,
-	"'template' bed file which features define treated regions" },
+	"'template' bed file which features define treated regions", NULL },
 	{ 'e',"ext-len",0,	tINT,	oTREAT, 0,	0, 1e3, NULL,
-	"length by which the features in 'template' bed file\nextend in both directions before treatment" },
-	{ 's',"space",	0,	tINT,	oTREAT, 100, 1, 1e4, NULL,
-	"resolution: span in bp by which reads will be counted\nto define a density" },
-	{ 'i', "info",	0,	tENUM,	oOUTPUT,Bed::iOFF, Bed::iNOTE, Bed::iSTAT, (char*)infos,
-	"output summary information about feature ambiguities, if they exist:\n? - notice, ? - statistics" },
+	"length by which the features in the 'template' bed file\nwill be extended in both directions before treatment", NULL },
+	{ 's',"space",	0,	tINT,	oTREAT, 100, 2, 1e4, NULL,
+	"resolution: span in bp by which reads will be counted\nto define a density", NULL },
+	{ 'i', "info",	0,	tENUM, oOUTPUT,	Obj::iEXT, Obj::iNM, Obj::iSTAT, (char*)infos,
+	"print information about file:\n? - name only, ? - number of reads, ? - statistics", NULL },
 	{ 'w', "warn",	0,	tENUM,	oOUTPUT,FALSE,	vUNDEF, 2, NULL,
-	"output each feature ambiguity, if they exist" },
-	{ 'o', "out",	0,	tENUM,	oOUTPUT,FALSE,	vUNDEF, 2, NULL, HelpOutFile.c_str() },
-	{ 't', "time",	0,	tENUM,	oOTHER,	FALSE,	vUNDEF, 2, NULL, "output run time" },
-	{ 'v', Version,	0,	tVERS,	oOTHER,	vUNDEF, vUNDEF, 0, NULL, "print program's version and quit" },
-	{ 'h', "help",	0,	tHELP,	oOTHER,	vUNDEF, vUNDEF, 0, NULL, "print usage information and quit" }
+	"print each read ambiguity, if they exist", NULL },
+	{ 'o', "out",	0,	tENUM,	oOUTPUT,FALSE,	vUNDEF, 2, NULL, HelpOutFile.c_str(), NULL },
+	{ 't', "time",	0,	tENUM,	oOTHER,	FALSE,	vUNDEF, 2, NULL, "print run time", NULL },
+	{ 'v', Version,	0,	tVERS,	oOTHER,	vUNDEF, vUNDEF, 0, NULL, "print program's version", NULL },
+	{ 'h', "help",	0,	tHELP,	oOTHER,	vUNDEF, vUNDEF, 0, NULL, "print usage information", NULL }
 };
 
 const BYTE	Options::_OptCount = oHELP + 1;
@@ -95,18 +92,17 @@ int main(int argc, char* argv[])
 		const char* gName  = FS::CheckedFileDirName(oGFILE);	// genome name
 		const char* aName = FS::CheckedFileName(argv[fileInd]);	// alignment name
 		const char* tName = Options::GetSVal(oFBED);			// template name
-		bool alarm	= Options::GetBVal(oALARM);					// print ambiguity messages
-		Bed::eInfo info	= Bed::eInfo(Options::GetIVal(oINFO));	// print ambiguities info
+		bool alarm	= Options::GetBVal(oALARM);					// if print ambiguity messages
+		Obj::eInfo info	= Obj::eInfo(Options::GetIVal(oINFO));	// if print ambiguities info
 		GenomeRegions gRgns(gName, cSizes, Options::GetIVal(oGAPLEN));
 
 		if( tName ) {
-			dout << Template << MSGSEP_BLANK;
-			templ = new BedF(FS::CheckedFileName(tName), cSizes, true, true, info, alarm);
-			templ->Extend(Options::GetIVal(oEXTLEN), false);
+			templ = new BedF(Template, FS::CheckedFileName(tName), cSizes, info, true, true, alarm);
+			templ->Extend(Options::GetIVal(oEXTLEN), cSizes, info);
 			templ->CheckFeaturesLength(Options::GetIVal(oSPACE), "space", "template");
 		}
-		BedR align((Alignment + MSGSEP_BLANK).c_str(), aName, cSizes, true, true, info, alarm,
-			Options::GetBVal(oDUPL), Options::GetBVal(oDIFFSZ), Options::GetIVal(oMINSCR));
+		BedR align("alignment", aName, cSizes, info, true, true, alarm,
+			Options::GetBVal(oDUPL), Options::GetIVal(oMINSCR));
 		if( templ && !SetCommonChroms(align, *templ, false) )
 			Err("no common chromosomes", "").Throw();
 		dout << EOL;
@@ -139,7 +135,7 @@ DenPro::DenPro(BedR &bedR, GenomeRegions &gRegn, BedF *bedF)
 	ULONG rCnt = 0;
 	if( bedF )  rCnt += Init(grDist, PairReadDistrib::IN_P);
 	rCnt += Init(grDist, PairReadDistrib::OUT_P);
-	dout << "\nDistributed " << BedR::ReadTitle(true) << MSGSEP_BLANK
+	dout << "\nDistributed " << bedR.ItemTitle(true) << SepSC
 			<< rCnt << sPercent(rCnt, ULLONG(bedR.ReadsCount(Chrom::StatedID())), 3) << EOL;
 
 	Consolidate(Options::GetIVal(oCONS));

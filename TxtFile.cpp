@@ -4,11 +4,12 @@
 const char* modes[] = { "r", "w", "a+" };
 const char* bmodes[] = { "rb", "wb" };
 
-// Throw exception if this instance is invalid and exception is allowed.
-inline void TxtFile::AbortInvalid()
+// Sets error code and throws exception if it is allowed.
+void TxtFile::SetError(Err::eCode errCode) const
 {
-	if( IsBad() && IsFlagSet(EXCEPT) )
-		Err(_errCode, FileName()).Throw();
+	_errCode = errCode;
+	if( IsFlagSet(ABORTING) )
+		Err(errCode, FileNameToExcept().c_str()).Throw();
 }
 
 // Initializes instance variables and opens a file with setting a proper error code in case of fault.
@@ -25,7 +26,7 @@ bool TxtFile::SetBasic(const string& fName, eAction mode, void* file)
 	_fName = fName;
 	_currRecPos = _recLen = _cntRecords = _readingLen = 0;
 #ifdef _NO_ZLIB
-	if( IsZipped() ) { _errCode = Err::FZ_BUILD; return false; }
+	if( IsZipped() ) { SetError(Err::FZ_BUILD); return false; }
 #endif
 	// set file stream
 	if( file )	_stream = file;
@@ -33,16 +34,14 @@ bool TxtFile::SetBasic(const string& fName, eAction mode, void* file)
 #ifndef _NO_ZLIB
 		if(IsZipped())
 			if( mode == ALL )	
-				_errCode = Err::FZ_OPEN;
+				SetError(Err::FZ_OPEN);
 			else				
 				_stream = gzopen(fName.c_str(), bmodes[mode]);
 		else
 #endif
 			_stream = fopen(fName.c_str(), modes[mode]);
-		if( _stream == NULL )
-			_errCode = Err::F_OPEN;
+		if( _stream == NULL )	SetError(Err::F_OPEN);
 	}
-	AbortInvalid();
 	return IsGood();
 }
 
@@ -58,8 +57,7 @@ bool TxtFile::CreateBuffer(eBuff buffType)
 			_buffLineOffset = 0;
 		}
 	}
-	catch(const bad_alloc) { _errCode = Err::F_MEM;	}
-	AbortInvalid();
+	catch(const bad_alloc)	{ SetError(Err::F_MEM); };
 	return IsGood();
 }
 
@@ -68,13 +66,15 @@ bool TxtFile::CreateBuffer(eBuff buffType)
 //	@mode: opening mode
 //	@cntRecLines: number of lines in a record
 //	@abortInvalid: true if invalid instance shold be completed by throwing exception
-TxtFile::TxtFile (const string& fName, eAction mode, BYTE cntRecLines, bool abortInvalid) :
+//	@rintName: true if file name should be printed in exception's message
+TxtFile::TxtFile (const string& fName, eAction mode, BYTE cntRecLines, bool abortInvalid, bool printName) :
 	_flag(0),
 	_cntRecLines(cntRecLines),
 	_buffLineLen(0)
 {
 	SetFlag(ZIPPED, FS::HasGzipExt(fName));
-	SetFlag(EXCEPT, abortInvalid);
+	SetFlag(ABORTING, abortInvalid);
+	SetFlag(PRNAME, printName);
 	if( !SetBasic(fName, mode, NULL) )	return;
 	// set file's and buffer's sizes
 	_buffLen = NUMB_BLK * BASE_BLK_SIZE;
@@ -104,7 +104,7 @@ TxtFile::TxtFile (const string& fName, eAction mode, BYTE cntRecLines, bool abor
 
 #ifdef ZLIB_NEW
 	if( IsZipped() && gzbuffer( (gzFile)_stream, _buffLen) == -1 )
-	{ _errCode = Err::FZ_MEM; return; }
+	{ SetError(Err::FZ_MEM); return; }
 #endif
 
 	if(mode != WRITE) {
@@ -171,7 +171,7 @@ TxtFile::~TxtFile()
 				gzclose( (gzFile)_stream) :
 #endif
 				fclose( (FILE*)_stream);
-		if( res )	_errCode = Err::F_CLOSE;
+		if( res )	SetError(Err::F_CLOSE);
 	}
 }
 
@@ -184,7 +184,7 @@ int TxtFile::ReadBlock(const UINT offset)
 #ifndef _NO_ZLIB
 	if( IsZipped() ) {
 		int len = gzread((gzFile)_stream, _buff + offset, _buffLen - offset);
-		if(len < 0) { _errCode = Err::F_READ; return -1; }
+		if(len < 0) { SetError(Err::F_READ); return -1; }
 		readLen = len;
 	}
 	else
@@ -192,7 +192,7 @@ int TxtFile::ReadBlock(const UINT offset)
 	{
 		readLen = fread(_buff + offset, sizeof(char), _buffLen - offset, (FILE*)_stream);
 		if(readLen != _buffLen - offset && !feof((FILE*)_stream) )
-		{ _errCode = Err::F_READ; return -1; }
+		{ SetError(Err::F_READ); return -1; }
 	}
 	
 	_readingLen = readLen + offset;
@@ -202,7 +202,7 @@ int TxtFile::ReadBlock(const UINT offset)
 	//_readTotal += _readingLen;
 //#endif
 	if( _readingLen != _buffLen && !IsZipped() && ferror((FILE*)_stream) )
-	{ _errCode = Err::F_READ; return -1; }
+	{ SetError(Err::F_READ); return -1; }
 	_currRecPos = 0;
 	return _readingLen == 0 ? 0 : 1;
 }
@@ -238,7 +238,7 @@ char* TxtFile::GetRecord(chrlen* const counterN, short* const posTab, BYTE cntTa
 					}
 				// jump to the next block
 				if( !currLinePos ) {			// this block is totally unreaded
-					_errCode = Err::F_BIGLINE;
+					SetError(Err::F_BIGLINE);
 					return ReadingEnded();
 				}
 				// length of untreated rest of record
@@ -379,8 +379,7 @@ void TxtFile::LineToBuffer(rowlen offset, bool closeLine)
 void TxtFile::AddRecord(const char *src, UINT len, bool closeLine, eMate mate)
 {
 	if( _currRecPos + len + 1 > _buffLen )	// write buffer to file if it's full
-		if( !Write(mate) )
-			Err(_errCode, FileName()).Throw();
+		Write(mate);
 	memcpy( _buff+_currRecPos, src, len );
 	_currRecPos += len;
 	if( closeLine )	_buff[_currRecPos++] = EOL;
@@ -390,8 +389,7 @@ void TxtFile::AddRecord(const char *src, UINT len, bool closeLine, eMate mate)
 // Writes current block to file.
 //	@mate: SINGLE for single file or MATE_FIRST | MATE_SECOND for pair of files.
 // Set up mutex for writing to synchronous files while multithreading.
-//	@return: true if successful
-bool TxtFile::Write(eMate mate) const
+void TxtFile::Write(eMate mate) const
 {
 	int res;
 #ifdef _MULTITHREAD
@@ -410,9 +408,8 @@ bool TxtFile::Write(eMate mate) const
 	if( mate != MATE_SINGLE )	// drop mutex by second mate and always by single file
 		Mutex::Unlock(Mutex::WR_FILE);
 #endif
-	if( res != _currRecPos )	_errCode = Err::F_WRITE;
+	if( res != _currRecPos )	SetError(Err::F_WRITE);
 	else						_currRecPos = 0;
-	return IsGood();
 }
 
 //bool	TxtFile::AddFile(const string fName)
@@ -463,6 +460,21 @@ void LineFile::WriteLine(const string& str, int val)
 #ifndef _FQSTATN
 
 #ifndef _WIGREG
+
+/************************ struct Region ************************/
+
+// Extends Region with chrom length control.
+// If extended Region starts from negative, or ends after chrom length, it is fitted.
+//	@extLen: extension length in both directions
+//	@cLen: chrom length
+void Region::Extend(chrlen extLen, chrlen cLen)
+{
+	Start -= extLen > Start ? Start : extLen;
+	if(cLen && (End += extLen) > cLen)	End = cLen;
+}
+
+/************************ end of struct Region ************************/
+
 /************************ class Regions ************************/
 
 // Geta total length of regions.
@@ -534,9 +546,10 @@ void Regions::FillInvert(const Regions &regn, chrlen maxEnd)
 //	return: written minimal gap length
 short Regions::Read(const string & fName)
 {
-	TabFile file(fName, 2, true);
+	TabFile file(fName, TxtFile::READ, 2);
 	ULONG evalLineLen = 0;
-	// first line is definition line with gap length
+	// first line is definition line with gap length;
+	// no need to check since aborting invalid file is set
 	const char* currLine = file.GetFirstLine(&evalLineLen);
 	short minGapLen = file.IntField(1);
 	Reserve( static_cast<chrlen>( file.Length() / evalLineLen ) );
@@ -595,35 +608,36 @@ void Regions::Print () const
 /************************ class TabFile ************************/
 const char TabFile::Comment = '#';
 
-// Creates new instance for reading.
-//	@fName: name of file
-//	@cntFields: number of fields separated by TAB
-//	@abortInvalid: true if invalid instance shold be completed by throwing exception
-//	@mode: action mode (read, write, all)
-//	@lineSpec: specific substring on which each data line is beginning;
-//	other lines are interpreting as comments and would be skipped; for reading only
-//	@comment: char indicates that line is comment; for reading only
-//	@checkFieldCnt: true if fields count should be checked; for reading only
-TabFile::TabFile(
-	const string & fName,
-	BYTE cntFields,
-	bool abortInvalid,
-	eAction mode,
-	const char* lineSpec,
-	char comment,
-	bool checkFieldCnt
-) : _lineSpec(lineSpec), _fieldPos(NULL), _lineSpecLen(0), _cntFields(cntFields+1),
-	_comment(comment), _checkFieldCnt(checkFieldCnt),
-	TxtFile(fName, mode, 1, abortInvalid)
+// Checks if field valid and throws exception if not.
+//	@ind: field index
+//	return: true if field is valid
+bool TabFile::IsFieldValid	(BYTE ind) const
 {
+	if(_fieldPos[ind] == vUNDEF		// vUNDEF was set in buff if there was no such field in the line
+	|| !SField(ind)[0]) {			// empty string was set if the line was ended by TAB (empty field)
+		if(ind < _params.MinFieldCnt)
+			ThrowLineExcept(Err::TF_FIELD);
+		return false;
+	}
+	return true;
+}
+
+// Initializes new instance.
+//	@mode: action mode (read, write, all)
+void TabFile::Init(eAction mode)
+{
+	_fieldPos = NULL;
+	_lineSpecLen = 0;
 	if( mode != WRITE && IsGood() )	{
-		_fieldPos = new short[_cntFields];
-		if(lineSpec)	_lineSpecLen = strlen(lineSpec);
+		_fieldPos = new short[_params.MaxFieldCnt];
+		if(_params.LineSpec)	_lineSpecLen = strlen(_params.LineSpec);
 	}
 }
 
 // Reads first line and set it as current.
-//	@cntLines: returned estimated count of lines. It works properly only if lines are sorted by ascending, f.e. in sorted bed-files.
+// Throws exception if invalid and aborting file is set
+//	@cntLines: returned estimated count of lines.
+//	It works properly only if lines are sorted by ascending, f.e. in sorted bed-files.
 //	return: current line
 const char* TabFile::GetFirstLine(ULONG *cntLines)
 {
@@ -633,6 +647,7 @@ const char* TabFile::GetFirstLine(ULONG *cntLines)
 	// check _fieldPos
 	//for(BYTE i=0; i<_cntFields; i++)
 	//	cout << _fieldPos[i] << EOL;
+	//if(!*cntLines)	SetError(Err::EMPTY);
 	return _currLine;
 }
 
@@ -646,33 +661,33 @@ const char*	TabFile::GetLine()
 	// First field's position usually is 0, but in case of blanks at the beginning of line
 	// it will be in first unblank position.
 	// So GetRecord(..) fiils _fieldPos beginning from second field.
-	memset(_fieldPos, vUNDEF, sizeof(short)*_cntFields);
+	memset(_fieldPos, vUNDEF, sizeof(short)*_params.MaxFieldCnt);
 
-	currLine = GetRecord(NULL, _fieldPos, _cntFields);
+	currLine = GetRecord(NULL, _fieldPos, _params.MaxFieldCnt);
 	if( currLine != NULL ) {
 		// skip blanks on the beginning of line
 		for(currPos=0; *(currLine+currPos)==BLANK; currPos++);
 		// skip comment line
-		if( *(currLine+currPos) == _comment )
+		if( *(currLine+currPos) == _params.Comment )
 			return GetLine();
 		// check line for specifier
-		if(_lineSpec && memcmp(currLine+currPos, _lineSpec, _lineSpecLen) ) {
-			//_errCode = Err::TF_SPEC;
+		if(_params.LineSpec && memcmp(currLine+currPos, _params.LineSpec, _lineSpecLen) ) {
+			//SetError(Err::TF_SPEC);
 			//return _currLine = NULL;
 			return GetLine();
 		}
 
 		// check readed field's positions, excluding first & last one
 		if( _checkFieldCnt )
-			for(BYTE i=1; i<_cntFields-1; i++)
+			for(BYTE i=1; i<_params.MaxFieldCnt-1; i++)
 				if( _fieldPos[i] == vUNDEF ) {
-					_errCode = Err::TF_FIELD;
+					SetError(Err::TF_FIELD);
 					return _currLine = NULL;
 				}
 
 		_fieldPos[0] = currPos;		// set start position of first field
 		// replace TABs by 0
-		for(BYTE i=1; i<_cntFields; i++) {
+		for(BYTE i=1; i<_params.MaxFieldCnt; i++) {
 			//if( (currPos=_fieldPos[i]) == vUNDEF ) {	// last position may be 0 if numbers of TABs in line is less than number of fields
 			if( _fieldPos[i] == vUNDEF ) {
 				currLine[RecordLength() -1] = '\0';		// close record by 0: it is necessery for last position

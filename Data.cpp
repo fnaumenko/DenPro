@@ -5,12 +5,11 @@
 	#include "Calc.h"
 #endif	//_BIOCC
 
-
-/************************ class Bed ************************/
-
 static const char* Per = " per ";
 
-Bed::Ambig::Msg Bed::Ambig::_Msgs [] = {
+/************************ class Obj ************************/
+
+Obj::Ambig::Msg Obj::Ambig::_Msgs [] = {
 	{ NULL, "duplicated",	"duplicated", },
 	{ NULL, "crossed",		"is intersected with previous" },
 	{ NULL, "adjacent",		"is adjacent with previous" },
@@ -18,168 +17,29 @@ Bed::Ambig::Msg Bed::Ambig::_Msgs [] = {
 	{ NULL, "too short",	"too short" },
 	{ NULL, "different size of", "different size of read" },
 	{ NULL, "filtered by low score", "filtered by score" },
+	{ NULL, "chrom exceeding",	"position exceeds chromosome length" },
 	{ NULL, "negligible",	"negligible chromosome" },
 };
 
-const char*	Bed::Ambig::_ActionMsgs[] = {
+const char*	Obj::Ambig::_ActionMsgs[] = {
 	"accepted",
 	"joined",
-	"skipped",
+	"omitted",
+	"omitted",
 	"execution aborted"
 };
 
-const Bed::Ambig::ReportCase Bed::Ambig::_Actions[] = {
-	&Bed::Ambig::Accept,
-	&Bed::Ambig::Handle,
-	&Bed::Ambig::Omit,
-	&Bed::Ambig::OmitQuiet,
-	&Bed::Ambig::Abort
+const Obj::Ambig::ReportCase Obj::Ambig::_Actions[] = {
+	&Obj::Ambig::Accept,
+	&Obj::Ambig::Handle,
+	&Obj::Ambig::Omit,
+	&Obj::Ambig::OmitQuiet,
+	&Obj::Ambig::Abort
 };
 
-// Prints entity name(s)
-//	@cnt: number of entity
-void Bed::Ambig::PrintEntityName(chrlen cnt) const
-{
-	dout << _entityName;
-	if(cnt>1)	dout <<  's';
-}
-
-// Prints entities count
-//	@cID: chromosome's ID or Chrom::UnID if all
-//	@cnt: number of entity
-void Bed::Ambig::PrintEntityCount(chrid cID, chrlen cnt) const
-{
-	dout << cnt << BLANK;
-	PrintEntityName(cnt);
-	if( cID != Chrom::UnID )	
-		dout << Per << Chrom::TitleName(cID);
-	//_infoPrinted = true;
-}
-
-// Creates an instance with omitted COVER, SHORT, SCORE and NEGL cases,
-// and BedF cases by default:
-// omitted DUPL cases and handled CROSS and ADJAC 
-Bed::Ambig::Ambig (bool alarm, bool printFileName, const string& entityName,
-	eAction dupl, eAction crossANDadjac, eAction diffsz) :
-	_alarm(alarm),
-	_printFileName(printFileName),
-	_unsortedItems(false),
-	_firstAlarm(true),
-	_infoPrinted(false),
-	_count(CHRLEN_UNDEF),
-	_entityName(entityName),
-	_file(NULL)
-{
-	memset(_cases, 0, _CasesCnt*sizeof(Case));	// initialize by 0
-	_cases[DUPL].Type = dupl;
-	_cases[CROSS].Type = _cases[ADJAC].Type = crossANDadjac;
-	_cases[COVER].Type = _cases[SHORT].Type = _cases[SCORE].Type = OMIT;
-	_cases[DIFFSZ].Type = diffsz;
-}
-
-// Print given ambiguity as alarm
-//	@ambig: given ambiguity
-void Bed::Ambig::PrintLineAlarm(eCase ambig) const
-{
-	if( _alarm ) {
-		_infoPrinted = true;
-		if( _firstAlarm )	{ dout << EOL;	_firstAlarm = false; }
-		Err(_Msgs[ambig].LineAlarm + BLANK + _entityName + MSGSEP_BLANK, FileRecordNumb()).
-			Warning(Message(ambig));
-	}
-}
-
-// Outputs case statistics
-//	@ambig: ambiguity's case
-//	@allCnt: total count of ambiguities
-//	@total: if true then prints total warning case
-void Bed::Ambig::PrintCaseStat(eCase ambig, chrlen allCnt, bool total) const
-{
-	//chrlen cnt = _stats[ambig];	// count of case's ambiguities
-	chrlen cnt = _cases[ambig].Count;	// count of case's ambiguities
-	if( !cnt )	return;
-	const char* totalAlarm = _Msgs[ambig].TotalAlarm;
-	if(total)	dout << WARNING;
-	else		dout << TAB;
-	dout<< cnt
-		<< sPercent(ULLONG(cnt), ULLONG(allCnt), 4) << BLANK
-		<< _Msgs[ambig].StatInfo << BLANK;
-	PrintEntityName(cnt);
-	if(UnsortedItems())		dout << " arisen after sorting";
-	if(totalAlarm)	dout << BLANK << totalAlarm;
-	dout << "; " << Message(ambig);
-	if(totalAlarm)	dout << '!';
-	dout << EOL;
-}
-
-// Outputs statistics.
-//	@cID: readed chromosome's ID or Chrom::UnID if all
-//	@title: string at the beginning
-//	@printItemCnt: if true then print count of items
-//	@itemCnt: count of all items (features/reads) from file
-//	@savedItemCnt: count of saved items (features/reads)
-void Bed::Ambig::PrintStatistics(
-	chrid cID, const char* title, bool printItemCnt, chrlen itemCnt, chrlen savedItemCnt) 
-{
-	if( title )	{
-		dout << title << MSGSEP_BLANK;
-		_infoPrinted = true;
-	}
-	if( printItemCnt )
-		PrintEntityCount(cID, itemCnt);
-	if( AmbigCount() ) {
-		if( printItemCnt )	dout << ", from which\n";
-		for(BYTE i=0; i<_CasesCnt; i++)
-			PrintCaseStat(static_cast<eCase>(i), itemCnt);
-
-		// print ambiguities of negligible chroms if all chroms are readed
-		if( cID == Chrom::UnID ) {
-			// calculate ambigs for negligible chroms:
-			// rest of difference between in & out features minus count of ambigs
-			_cases[NEGL].Count = itemCnt - savedItemCnt - AmbigCount();
-			// correct (add) accepted features
-			for(BYTE i=0; i<_CasesCnt-1; i++)	// loop excepting NEGL chroms case
-				if( _cases[i].Type == Ambig::ACCEPT )	_cases[NEGL].Count += _cases[i].Count;
-			
-			PrintCaseStat(NEGL, itemCnt);
-		}
-		// print total remained entities
-		dout<< TAB << Total << " remained: " << savedItemCnt
-			<< sPercent(ULLONG(savedItemCnt), ULLONG(itemCnt), 4) << BLANK;
-		PrintEntityName(savedItemCnt);
-		_infoPrinted = true;
-	}
-	if( _infoPrinted )	dout << EOL;
-	fflush(stdout);
-}
-
-// Prints total warning if some ambiguous are occurs; needs for silent and laconic modes
-//	@printFull: true if full info should be printed; otherwise count of items only
-//	@cID: readed chromosome's ID or Chrom::UnID if all
-//	@printItemCnt: if true then print count of items
-//	@itemCnt: count of all items (features/reads) from file
-void Bed::Ambig::PrintInfo(bool printFull, chrid cID, bool printItemCnt, chrlen itemCnt) const
-{
-	if(printItemCnt)		PrintEntityCount(cID, itemCnt);
-	if(!printFull || !AmbigCount())		return;
-	if(printItemCnt)		dout << EOL;
-	for(BYTE i=0; i<_CasesCnt; i++)
-		PrintCaseStat(static_cast<eCase>(i), itemCnt, true);
-	_infoPrinted = true;
-	fflush(stdout);
-}
-
-// Adds statistics and print given ambiguity as alarm (if permitted)
-//	@ambig: given ambiguity
-//	return: treatment code: 1 - accept, 0 - handle, -1 - omit
-int Bed::Ambig::TreatCase(eCase ambig)
-{
-	_cases[ambig].Count++;
-	return (this->*_Actions[_cases[ambig].Type])(ambig);
-}
-
 // Gets count of ambiguities
-chrlen Bed::Ambig::AmbigCount() const {
+chrlen Obj::Ambig::Count() const
+{
 	if( _count == CHRLEN_UNDEF ) {
 		_count = 0;
 		for(BYTE i=0; i<_CasesCnt; i++)	_count += _cases[i].Count;
@@ -187,155 +47,369 @@ chrlen Bed::Ambig::AmbigCount() const {
 	return _count;
 }
 
-// Initializes Region with checking
-static void InitRegn(Region& rgn, long start, long end, long cLen, const Bed::Ambig& ambig)
+// Prints entities count
+//	@cID: chromosome's ID or Chrom::UnID if all
+//	@cnt: number of entity
+void Obj::Ambig::PrintEntityCount(chrid cID, chrlen cnt) const
 {
-	if(start < 0 || end < 0)	ambig.ThrowExcept(Err::BP_NEGPOS);
-	if(start >= end)			ambig.ThrowExcept(Err::BP_BADEND);
-	if(cLen > 0 && end > cLen)	ambig.ThrowExcept(Err::BP_EXCEED);
-	rgn.Init(start, end);
+	dout << cnt << BLANK << EntityName(cnt);
+	if( cID != Chrom::UnID )	
+		dout << Per << Chrom::TitleName(cID);
 }
 
-// Initializes new instance by bed-file name.
-//	@fName: name of bed-file
-//	@ambig: ambiguous filters
-//	@cSizes: chrom sizes to control the chrom length exceedeng; if NULL, no control
-//	@abortInvalid: true if invalid instance shold be completed by throwing exception
-//	@info: type of feature ambiguties that should be printed
-//	@printItemCnt: if true then print count of items
-//	@return: count of features/reads in file
-ULONG Bed::Init	(const string& fName, Ambig& ambig, const ChromSizes* cSizes,
-	bool abortInvalid, eInfo info, bool printItemCnt)
+// Print given ambiguity as line alarm
+//	@ambig: given ambiguity
+void Obj::Ambig::PrintLineAlarm(eCase ambig) const
 {
-	ULONG	cntLines = 0,		// count of lines beginning with 'chr'
-			currInd = 0,		// current index in Feature's/Read's container.
-								// Needed to avoid excess virtual method given current container size
-			initFeatrsSize;		// initial size of _items
-	bool	cAll = Chrom::StatedAll();	// true if all chroms are stated by user
-	TabFile file(fName, _FieldsCnt, abortInvalid, TxtFile::READ, Chrom::Abbr, TabFile::Comment, false);
-	Timer	timer;
+	if( _alarm ) {
+		if( !_alarmPrinted )	{ dout << EOL;	_alarmPrinted = true; }
+		_file->ThrowLineWarning(
+			_Msgs[ambig].LineAlarm + BLANK + EntityName() + SepC,
+			Message(ambig));
+	}
+}
 
-	if( ambig.PrintFileName() )	{ dout << fName << MSGSEP_BLANK; fflush(stdout); }
+// Outputs case statistics
+//	@ambig: ambiguity's case
+//	@allCnt: total count of ambiguities
+//	@total: if true then prints total warning case
+void Obj::Ambig::PrintCaseStat(eCase ambig, chrlen allCnt, bool total) const
+{
+	chrlen cnt = _cases[ambig].Count;	// count of case's ambiguities
+	if( !cnt )	return;
+	const char* totalAlarm = _Msgs[ambig].TotalAlarm;
+	if(total)	dout << Notice;
+	else		dout << TAB;
+	dout<< cnt
+		<< sPercent(ULLONG(cnt), ULLONG(allCnt), 4) << BLANK
+		<< _Msgs[ambig].StatInfo << BLANK
+		<< EntityName(cnt);
+	if(unsortedItems)		dout << " arisen after sorting";
+	if(totalAlarm)	dout << BLANK << totalAlarm;
+	dout << "; " << Message(ambig);
+	if(totalAlarm)	dout << '!';
+	dout << EOL;
+}
+
+const char* ACCEPTED = " accepted";
+
+// Prints accepted items with specifying chrom
+//	@cID: readed chromosome's ID or Chrom::UnID if all
+//	@prAcceptItems: if true then prints number of accepted items
+//	@itemCnt: count of accepted items after treatment
+void Obj::Ambig::PrintItems(chrid cID, bool prAcceptItems, long itemCnt) const
+{
+	if(prAcceptItems) {
+		dout << itemCnt;
+		dout << ACCEPTED;
+	}
+	if(_info > Obj::iNM) {
+		dout << BLANK << EntityName(itemCnt);
+		if( cID != Chrom::UnID )	dout << Per << Chrom::ShortName(cID);
+	}
+}
+
+// Creates an instance with omitted COVER, SHORT, SCORE and NEGL cases,
+// and BedF cases by default:
+// omitted DUPL cases and handled CROSS and ADJAC 
+Obj::Ambig::Ambig (eInfo info, bool alarm, FT::eTypes format,
+	eAction dupl, eAction crossANDadjac, eAction diffsz) :
+	_info(info),
+	_alarm(alarm),
+	_fType(format),
+	_alarmPrinted(info <= Obj::iLAC),	// if LAC, do not print EOL at the first time
+	_count(CHRLEN_UNDEF),
+	_file(NULL),
+#ifndef _ISCHIP
+	_treatcID(vUNDEF),
+#endif
+	unsortedItems(false)
+{
+	memset(_cases, 0, _CasesCnt*sizeof(Case));	// initialize by 0
+	_cases[DUPL].Type = dupl;
+	_cases[CROSS].Type = _cases[ADJAC].Type = crossANDadjac;
+	_cases[COVER].Type = _cases[SHORT].Type = _cases[SCORE].Type = OMIT;
+	_cases[DIFFSZ].Type = diffsz;
+	_cases[EXCEED].Type = OMIT;
+}
+
+// Initializes given Region by second and third current reading line positions, with validating
+//	@rgn: Region that should be initialized
+//	@cLen: chrom lemgth
+//	return: true if Region was initialized successfully
+bool Obj::Ambig::InitRegn(Region& rgn, chrlen cLen)
+{
+	long start = _file->LongField(1);
+	long end = _file->LongField(2);
+	if(start < 0 || end < 0)	ThrowExcept(Err::BP_NEGPOS);
+	if(start >= end)			ThrowExcept(Err::BP_BADEND);
+	if(cLen > 0 && chrlen(end) > cLen && TreatCase(EXCEED) < 0)	return false;
+	rgn.Init(start, end);
+	return true;
+}
+
+// Prints statistics.
+//	@cID: readed chromosome's ID or Chrom::UnID if all
+//	@title: string at the beginning; if NULL then this instance is used while initialization and don't feeds line
+//	@totalItemCnt: count of all items
+//	@acceptItemCnt: count of accepted items after treatment
+//	return: true if something has been printed.
+//	The last line never ends with EOL 
+bool Obj::Ambig::Print(chrid cID, const char* title, ULONG totalItemCnt, ULONG acceptItemCnt)
+{
+	bool res = false;
+	if(_info <= Obj::iLAC || !totalItemCnt)		return false;
+	bool noAmbigs = totalItemCnt == acceptItemCnt;
+
+	if( title )	{		// additional mode: after extension
+		if(_info < Obj::iEXT || noAmbigs)		return false;	// no ambigs
+		dout << "    " << title << SepC;
+		if(_info==Obj::iEXT)
+			PrintItems(cID, true, acceptItemCnt);
+		dout << EOL;
+	}
+	else {				// main mode: addition to file name
+		bool printAccept = _info==Obj::iEXT && !noAmbigs;		// print accepted items
+
+		if(_info > Obj::iNM) {
+			dout << SepC << totalItemCnt;
+			if(!noAmbigs)	dout << BLANK << Total;
+		}
+		if(printAccept)		dout << ", ";
+		PrintItems(cID, printAccept, acceptItemCnt);
+		res = true;
+	}
+	if(Count() && _info == Obj::iSTAT) {
+		if(!title)		dout << ", from which" << EOL;
+		for(BYTE i=0; i<_CasesCnt; i++)
+			PrintCaseStat(static_cast<eCase>(i), totalItemCnt);
+
+		// print ambiguities of negligible chroms if all chroms are readed
+		if( cID == Chrom::UnID ) {
+			// calculate ambigs for negligible chroms:
+			// rest of difference between in & out features minus count of ambigs
+			_cases[NEGL].Count = totalItemCnt - acceptItemCnt - Count();
+			// correct (add) accepted features
+			for(BYTE i=0; i<_CasesCnt-1; i++)	// loop excepting NEGL chroms case
+				if( _cases[i].Type == Ambig::ACCEPT )	_cases[NEGL].Count += _cases[i].Count;
+			
+			PrintCaseStat(NEGL, totalItemCnt);
+		}
+		// print total remained entities
+		dout<< TAB << Total << ACCEPTED << SepC << acceptItemCnt
+			<< sPercent(ULLONG(acceptItemCnt), ULLONG(totalItemCnt), 4) << BLANK
+			<< EntityName(acceptItemCnt);
+		res = true;
+	}
+	fflush(stdout);
+	return res;
+}
+
+// Adds statistics and print given ambiguity as alarm (if permitted)
+//	@ambig: given ambiguity
+//	return: treatment code: 1 - accept, 0 - handle, -1 - omit
+int Obj::Ambig::TreatCase(eCase ambig)
+{
+	_cases[ambig].Count++;
+	return (this->*_Actions[_cases[ambig].Type])(ambig);
+}
+
+#ifndef _ISCHIP
+// Remember treated chrom.
+void Obj::Ambig::SetTreatedChrom(chrid cid)
+{
+	if(_treatcID == -1)					_treatcID = cid;
+	else if(_treatcID != Chrom::UnID)	_treatcID = Chrom::UnID;
+}
+#endif
+
+// EOL rules.
+// appearance of info on the screen while Init() and others | ended by EOL
+// -----------------------------------------------------------------------
+//	exception throwing from file.LongField() etc.	-
+//	exception throwing from ChildInit()				-
+//	line alarm warning								+
+//	file title (silent mode)						-
+//	file title (nonesilent mode)					-
+//	file title + item info (nonesilent mode)		-
+//	statistics										-
+//	statistics after extention						-
+//	
+
+
+// Throws exception or warning message
+//	@err: input error
+//	@abortInvalid: if true, throws exception, otherwise throws warning
+void Obj::ThrowError(Err &err, bool abortInvalid)
+{
+	_isBad = true;
+	_EOLneeded = true;
+	err.Throw(abortInvalid, false);
+}
+
+// Initializes new instance by by tab file name.
+//	@title: title printed before file name
+//	@fName: name of file
+//	@ambig: ambiguities
+//	@addObj: auxiliary object using while initializing
+//	@isInfo: true if file info should be printed
+//	@abortInvalid: true if invalid instance shold be completed by throwing exception
+void Obj::Init	(const char* title, const string& fName, Ambig& ambig, void* addObj,
+	bool isInfo, bool abortInvalid)
+{
+	if( !FT::CheckType(fName.c_str(), ambig.FileType()) )	// in case of bioCC the list is checked already,
+		Err("wrong extension", fName).Throw(abortInvalid);	// so better is to add a parameter to Init(),
+															// but it is not worth it
+	bool printed;
+	dchrlen items;
+	Timer	timer(isInfo);
+
+	if( isInfo ) {
+		if(title)	dout << title << BLANK;
+		dout << fName;
+		fflush(stdout); 
+		_EOLneeded = true;
+	}
 	try {
-		if( file.IsBad() )
-			Err(file.ErrCode(), ambig.PrintFileName() ? sBACK : fName).Throw();
+		TabFile file(fName, FT::FileParams(ambig.FileType()), abortInvalid, !isInfo, false);
 		ambig.SetFile(file);
-		if( !file.GetFirstLine(&initFeatrsSize) )
-			if( file.ErrCode() == Err::NONE )	// file is right, but no any features
-				Err(Err::TF_EMPTY, ambig.PrintFileName() ? sBACK : fName, ItemTitle(true)).Throw();
-			else								// wrong first line
-				ambig.ThrowExcept(file.ErrCode());
-		
-		ULONG 	firstInd = 0;	// first index in feature's container for current chromosome
-		Region	rgn;			// current feature positions
-		chrlen	prevStart=0,	// start previous feature positions
-				cLen = 0;		// the length of chromosome
-		chrid	cCurrID,		// current chromosome's ID
-				cNextID;		// next chromosome's ID
-		bool	needSortChrom = false;
-		char cName[Chrom::MaxShortNameLength + 1];	// chrom number (only) buffer
-
-		Reserve(cAll ? Chrom::Count : 1);
-		ReserveItemContainer(initFeatrsSize);
-		cName[0] = 0;	// empty initial chrom name
-		cCurrID = Chrom::ID(file.ChromName());		// first chrom ID
-		if(cSizes)	cLen = cSizes->Size(cCurrID);
-
-		do {
-			if( strcmp(cName, file.ChromName()) ) {	// next chromosome?
-				// chrom's name may be long such as 'chrY_random'
-				cNextID = Chrom::ID(file.ChromName());
-				if( cNextID == Chrom::UnID ) {		// negligible next chromosome?
-					cCurrID = cNextID;
- 					continue;
-				}
-				// now we can save this chrom name
-				strcpy(cName, file.ChromName());
-				if( cAll ) {			// are all chroms as parameter defined?
-					if( currInd != firstInd	)		// have been features for this chrom saved?
-						// save current chrom which features have been saved already
-						AddVal(cCurrID, ChromItemsInd(firstInd, currInd));
-					if( cNextID < cCurrID && cNextID != Chrom::M )	// unsorted chrom?
-						needSortChrom = true;
-				}
-				else {		// single chromosome as parameter is defined
-					// features in a single defined chrom were saved;
-					// the chrom proper will be saved after loop
-					if(rgn.End)			
-						break;
-					if(needSortChrom)
-						Err("is unsorted. Option --chr " + Chrom::Name(Chrom::StatedID())
-						+ " is forbidden", fName).
-							Throw();
-					if(cNextID != Chrom::StatedID())	continue;
-				}
-				cCurrID = cNextID;
-				firstInd = currInd;
-				if(cSizes)	cLen = cSizes->Size(cCurrID);
-				InitRegn(rgn, file.LongField(1), file.LongField(2), cLen, ambig);
-				cntLines++;
-			}
-			else { 
-				if( cCurrID == Chrom::UnID )				// negligible chrom?
-					continue;
-				if( !cAll && cCurrID != Chrom::StatedID() )	// undefined chrom?
-					continue;
-				InitRegn(rgn, file.LongField(1), file.LongField(2), cLen, ambig);
-				cntLines++;
-				if( rgn.Start < prevStart )			// unsorted feature?
-					ambig.ItemsAreUnsorted();
-				// handle positions for the same chromosome only
-				if( !CheckLastPos(rgn, ambig) )
-					continue;
-			}
-			if( AddPos(rgn,	file.StrField(3), file.FloatField(4), file.StrField(5)) )
-				currInd++;
-			else
-				ambig.TreatCase(ambig.SCORE);
-			prevStart = rgn.Start;
-		}
-		while( file.GetLine() );
-
-		if( file.IsBad() )	// line may be NULL because of wrong
-			ambig.ThrowExcept(file.ErrCode());
-
-		if( rgn.End && currInd ) {		// some features for as minimum one valid chrom were saved
-			if( cCurrID != Chrom::UnID )	// valid last chrom?
-				// save last chrom. Its features have been saved already.
-				AddVal(cCurrID, ChromItemsInd(firstInd, currInd));
-			if( initFeatrsSize/currInd > 2 )	
-				ShrinkItemContainer();
-			if( needSortChrom )
-				Sort();
-			if( ambig.UnsortedItems() )
-				SortItems(ambig);
-		}
+		items = InitChild(ambig, addObj);
 	}
-	catch(Err &err) { ThrowError(err, abortInvalid); }
-	SetAllItemsCount();
-	if( !_isBad ) {
-		if(info == iSTAT)		// print statistics
-			ambig.PrintStatistics(Chrom::StatedID(), 
-				ambig.PrintFileName() ? NULL : fName.c_str(),	// fname is printed yet or not
-				printItemCnt, cntLines, AllItemsCount());
-		else
-			ambig.PrintInfo(info == iNOTE, Chrom::StatedID(), printItemCnt, cntLines);
-		_EOLPrinted = ambig.IsAddInfoPrinted();
-	}
-	if(Timer::Enabled && !_EOLPrinted)	dout << BLANK;
-	timer.Stop(true, _EOLPrinted);
-	if(!_EOLPrinted && (printItemCnt || ambig.PrintFileName())) {
-		dout << EOL; 
-		_EOLPrinted = true;
-		//fflush(stdout);	
-	}
-	if( !_isBad && !currInd ) {
-		string specify = ItemTitle(true);
-		if(!cAll)	specify += Per + Chrom::TitleName(Chrom::StatedID());
-		Err err(Err::TF_EMPTY, fName, specify);
+	catch(Err& err) {	// intercept an exception to manage _isBad and aborting if invalid
 		ThrowError(err, abortInvalid);
 	}
-	return cntLines;
+#ifndef _ISCHIP
+	if(abortInvalid)
+		ambig.KeepTreatedChrom();	// save treated chrom for primary
+#endif
+	if( !_isBad ) {
+		if( !items.second ) {		// no items for given chrom
+			string sender = isInfo ? strEmpty : fName;
+			string specify = ItemTitle(true);
+			if(!Chrom::StatedAll())	specify += Per + Chrom::ShortName(Chrom::StatedID());
+			Err err(Err::TF_EMPTY, sender.c_str(), specify);
+			ThrowError(err, abortInvalid);
+		}
+		printed = ambig.Print(Chrom::StatedID(), NULL, items.first, items.second);
+	}
+	if(timer.IsEnabled())	dout << BLANK;
+	timer.Stop(true, false);
+	PrintEOL(printed && !ambig.IsAlarmPrinted());
+}
+
+// Prints EOL if needs.
+//	@printEOL: true if EOL should be printed
+void Obj::PrintEOL(bool printEOL)
+{
+	if(printEOL || _EOLneeded)	dout << EOL;
+	_EOLneeded = false;
+}
+
+
+/******************** end of class Obj *********************/
+
+/************************ class Bed ************************/
+
+// Initializes instance from tab file
+//	@ambig: ambiguities
+//	@pcSizes: chrom sizes
+//	return: numbers of all and initialied items for given chrom
+dchrlen Bed::InitChild	(Ambig& ambig, void* pcSizes)
+{
+	ULONG	initSize;		// initial size of _items
+	TabFile& file = ambig.File();
+	ChromSizes* cSizes = (ChromSizes*)pcSizes;
+
+	if( !file.GetFirstLine(&initSize) )	return make_pair(0, 0);
+		
+	chrlen 	firstInd = 0,	// first index in feature's container for current chromosome
+			cntLines = 0,	// count of lines beginning with 'chr'
+			currInd	= 0;	// current index in Feature's/Read's container.
+							// Needed to avoid excess virtual method given current container size
+	Region	rgn;			// current feature positions
+	chrlen	prevStart=0,	// start previous feature positions
+			cLen = 0;		// the length of chromosome
+	chrid	cCurrID,		// current chromosome's ID
+			cNextID;		// next chromosome's ID
+	bool	needSortChrom = false;
+	bool	cAll = Chrom::StatedAll();				// true if all chroms are stated by user
+	char	cName[Chrom::MaxShortNameLength + 1];	// chrom number (only) buffer
+
+	Reserve(cAll ? Chrom::Count : 1);
+	ReserveItemContainer(initSize);
+	cName[0] = 0;	// empty initial chrom name
+	cCurrID = Chrom::ID(file.ChromName());		// first chrom ID
+	if(cSizes)	cLen = cSizes->Size(cCurrID);
+
+	do {
+		if( strcmp(cName, file.ChromName()) ) {	// next chromosome?
+			// chrom's name may be long such as 'chrY_random'
+			cNextID = Chrom::ID(file.ChromName());
+			if( cNextID == Chrom::UnID ) {		// negligible next chromosome?
+				cCurrID = cNextID;
+ 				continue;
+			}
+			// now we can save this chrom name
+			strcpy(cName, file.ChromName());
+			if( cAll ) {			// are all chroms specified?
+				if( currInd != firstInd	)		// have been features for this chrom saved?
+					// save current chrom which features have been saved already
+					AddVal(cCurrID, ChromItemsInd(firstInd, currInd));
+				if( cNextID < cCurrID && cNextID != Chrom::M )	// unsorted chrom?
+					needSortChrom = true;
+			}
+			else {		// single chromosome is specified
+				// features in a single defined chrom were saved;
+				// the chrom proper will be saved after loop
+				if(rgn.End)			break;
+				if(needSortChrom)
+					file.ThrowExcept(
+						"is unsorted. Option --chr " + Chrom::Name(Chrom::StatedID()) + " is forbidden");
+				if(cNextID != Chrom::StatedID())	continue;
+			}
+			cCurrID = cNextID;
+#ifndef _ISCHIP
+			ambig.SetTreatedChrom(cCurrID);
+#endif
+			firstInd = currInd;
+			cntLines++;
+			if(cSizes)	cLen = cSizes->Size(cCurrID);
+			if( !ambig.InitRegn(rgn, cLen) )
+				continue;
+		}
+		else { 
+			if( cCurrID == Chrom::UnID						// negligible chrom?
+			|| (!cAll && cCurrID != Chrom::StatedID()) )	// undefined chrom?
+				continue;
+			cntLines++;
+			if( !ambig.InitRegn(rgn, cLen) )
+				continue;
+			if( rgn.Start < prevStart )			// unsorted feature?
+				ambig.unsortedItems = true;
+			if( !CheckLastPos(rgn, ambig) )		// check positions for the same chromosome only
+				continue;
+		}
+		if(AddPos(rgn, file))	currInd++;
+		else					ambig.TreatCase(ambig.SCORE);
+		prevStart = rgn.Start;
+	}
+	while( file.GetLine() );
+
+	if( rgn.End && currInd ) {		// some features for at least one valid chrom were saved
+		if( cCurrID != Chrom::UnID )	// is last chrom valid?
+			// save last chrom. Its features are saved already.
+			AddVal(cCurrID, ChromItemsInd(firstInd, currInd));
+
+		if( initSize/currInd > 2 )	ShrinkItemContainer();
+		if( needSortChrom )					Sort();
+		if( ambig.unsortedItems ) {
+			file.ThrowExcept("unsorted " + ItemTitle(true) + ". Sorting may take ime.", false);
+			SortItems(ambig);
+		}
+	}
+	SetAllItemsCount();
+	
+	return make_pair(cntLines, AllItemsCount());
 }
 
 //#ifdef _DENPRO
@@ -367,7 +441,7 @@ void Bed::PrintChrom() const
 {
 	for(cIter it=cBegin(); it!=cEnd(); it++)
 		cout << Chrom::AbbrName(CID(it)) << TAB
-		<< it->second.FirstInd << TAB << it->second.LastInd << MSGSEP_TAB
+		<< it->second.FirstInd << TAB << it->second.LastInd << SepCTab
 		<< it->second.ItemsCount() << TAB << ItemTitle() << 's' << EOL;
 }
 
@@ -394,8 +468,6 @@ void Bed::Print(chrlen itemCnt) const
 #if !defined _ISCHIP && !defined _WIGREG
 
 /************************ class BedR ************************/
-const string BedR::_ItemTitle = "read";
-const string BedR::_ItemTitles = BedR::_ItemTitle + 's';
 
 // Checks the element for the new potential start/end positions for all possible ambiguous.
 //	@it: iterator reffering to the compared element
@@ -418,14 +490,16 @@ bool BedR::CheckItemPos(ItemsIter it, const Region& rgn, Ambig& ambig)
 const string NotStated = " is not stated";
 
 // Adds Read to the container.
-//	@rgn: start/end Read positions
-//	@rName: Read name field
-//	@score: Read score
-//	@strand: Read strand
+//	@rgn: Region with mandatory fields
+//	@file: file to access to additionally fields
 //	return: true if Read was added successfully
-bool BedR::AddPos(const Region& rgn, const char* rName, float score, const char* strand) {
+bool BedR::AddPos(const Region& rgn, TabFile& file)
+{
+	float score = file.FloatField(4);
 	if( score <= _minScore )	return false;				// pass Read with under-threshhold score
 #ifdef _VALIGN
+	const char* rName = file.StrField(3);
+	const char strand = *file.StrField(5);
 	if( _rNameType == Read::nmUndef ) {	// first Read: define type of Read's name
 		const char* sNumVal = strchr(rName, *Read::NmNumbDelimiter);
 		if( sNumVal ) {
@@ -433,18 +507,17 @@ bool BedR::AddPos(const Region& rgn, const char* rName, float score, const char*
 			_rNameType = *(sNumVal+1) == *(Read::NmNumbDelimiter+1) ?
 				Read::nmNumb : Read::nmPos;
 		}
-		else	Err(Err::BR_RNAME, StrEmpty, "delimiter COLON" + NotStated).Throw();
+		else	Err(Err::BR_RNAME, NULL, "delimiter COLON" + NotStated).Throw();
 	}
 	if( !(rName = Chrom::FindNumb(rName)) )
-		Err(Err::BR_RNAME, StrEmpty, Chrom::Title + NotStated).Throw();
+		Err(Err::BR_RNAME, NULL, Chrom::Title + NotStated).Throw();
 	chrid cID = Chrom::ID(rName);
 	// pass chrom number with unknown capacity and possible Number Delimiter
 	rName = strchr(rName+1, *Read::NmNumbDelimiter) + 1;	
-	if( _paired && _rNameType == Read::nmPos && *strand == Read::Strand[1]) {
+	if( _paired && _rNameType == Read::nmPos && strand == Read::Strand[1]) {
 		const char* posDelim = strchr(rName, Read::NmPosDelimiter);
 		if( posDelim )		rName = posDelim + 1;
-		else
-			Err(Err::BR_RNAME, StrEmpty, "paired-end delimiter '-'" + NotStated).Throw();
+		else	Err(Err::BR_RNAME, NULL, "paired-end delimiter '-'" + NotStated).Throw();
 	}
 	_items.push_back(Read(rgn.Start, cID, size_t(atol(rName)), readscr(score)));
 #else
@@ -479,8 +552,6 @@ bool BedR::AddPos(const Region& rgn, const char* rName, float score, const char*
 
 #ifndef _VALIGN
 /************************ class BedF ************************/
-const string BedF::_ItemTitle = "feature";
-const string BedF::_ItemTitles = BedF::_ItemTitle + 's';
 
 // Sets new end position on the feature if necessary.
 //	@it: iterator reffering to the feature which end position may be corrected
@@ -505,11 +576,10 @@ bool BedF::CorrectItemsEnd(ItemsIter it, chrlen end, int treatCaseRes) {
 //  return: true if item should be accepted; otherwise false
 bool BedF::CheckItemPos(ItemsIter it, const Region& rgn, Ambig& ambig)
 {
-	// features should be sorted!
 #ifdef _BIOCC
-	if( _uniformFtrLen )
-		if(!_ftrLen)	_ftrLen = rgn.Length();	// initialize feature's length once
-		else 			_uniformFtrLen = (_ftrLen == rgn.Length());
+	if( _unifLen )	// check if features have equel length
+		if(_fLen)	_unifLen = abs(_fLen-long(rgn.Length())) <= 10;	// consider the difference 10 as a threshold
+		else		_fLen = rgn.Length();	// initialize feature's length once
 #endif
 	Region currRgn = *it;
 	if(rgn == currRgn)					// duplicated feature?
@@ -527,16 +597,18 @@ bool BedF::CheckItemPos(ItemsIter it, const Region& rgn, Ambig& ambig)
 	return true;
 }
 
-// Adds feature to the container.
+// Adds feature to the container
+//	@rgn: Region with mandatory fields
+//	@file: file to access to additionally fields
 //	return: true if Read was added successfully
-bool BedF::AddPos(const Region& rgn, const char* name, float score, const char* strand)
+bool BedF::AddPos(const Region& rgn, TabFile& file)
 {
-	_items.push_back(Featr(rgn
 #ifdef _ISCHIP
-		, score));
+	readscr score = file.FloatField(4);
+	_items.push_back(Featr(rgn, score));
 	if(score > _maxScore)	_maxScore = score;
 #else
-		));
+	_items.push_back(Featr(rgn));
 #endif
 	return true;
 	//if(end - start > _maxFtrLen) {	_maxFtrLen = end - start; _maxFtrStart = start; }
@@ -595,42 +667,68 @@ void BedF::FillRegions(chrid cID, Regions& regn) const {
 }
 #endif	// _ISCHIP
 
-// Extends or shrinks all chromosomes features positions on the fixed length in both directions.
+//const chrlen UNDEFINED  = std::numeric_limits<int>::max();
+#define UNDEFINED	vUNDEF
+
+// Extends all features positions on the fixed length in both directions.
+// If extended feature starts from negative, or ends after chrom length, it is fitted.
 //	@extLen: distance on which start should be decreased, end should be increased
 //	or inside out if it os negative
-//	@printStats: true if statistics should be printed
-void BedF::Extend(int extLen, bool printStats)
+//	@cSizes: chrom sizes
+//	@info: displayed info
+//	return: true if instance have been changed
+bool BedF::Extend(int extLen, const ChromSizes* cSizes, eInfo info)
 {
-	if( !extLen )	return;
-	ULONG	rmvCnt = 0;		// counter of removed items in current chrom
+	if( !extLen )	return false;
+	chrlen	rmvCnt;		// counter of removed items in current chrom
+	chrlen	allrmvCnt = 0;
+	Iter cit;
 	ItemsIter fit, fitLast;
-	Ambig ambig(false, true, _ItemTitle);
+	chrlen	cLen = 0;			// chrom length
+	Ambig ambig(info, false, FT::BED);
 
-	for(Iter cit=Begin(); cit!=End(); cit++) {
-		fit		= _items.begin() + (cit->second.FirstInd -= rmvCnt);
-		fitLast	= _items.begin() + (cit->second.LastInd  -= rmvCnt);
-		fit->Start -= extLen;
-		fit->End += extLen;
-		for(rmvCnt=0, fit++; fit<=fitLast; fit++) {
-			fit->Start -= extLen;
-			fit->End += extLen;
+	for(cit=Begin(); cit!=End(); cit++) {	// loop through chroms
+		if(cSizes)	cLen = cSizes->Size(CID(cit));
+		fit		= ItemsBegin(cit);
+		fitLast	= ItemsEnd(cit);
+		fit->Extend(extLen, cLen);			// first item
+		rmvCnt = 0;
+		for(fit++; fit!=fitLast; fit++) {
+			fit->Extend(extLen, cLen);		// next item: compare to previous
 			if( ( fit->Start < (fit-1)->End	&& ambig.TreatCase(ambig.CROSS) >= 0 )
-			||( fit->Start == (fit-1)->End	&& ambig.TreatCase(ambig.ADJAC) >= 0 ) )
+			|| ( fit->Start == (fit-1)->End && ambig.TreatCase(ambig.ADJAC) >= 0 ) )
 			{	// merge crossing/adjacent features
-				(fit-1)->End = fit->End;
-				_items.erase(fit--);
-				cit->second.LastInd--;
-				fitLast--;
 				rmvCnt++;
+				(fit-rmvCnt)->End = fit->End;
+				fit->Start = UNDEFINED;		// mark item as removed
 			}
+			else {	allrmvCnt += rmvCnt; rmvCnt=0;	}
 		}
 	}
-	if( printStats && ambig.AmbigCount() )
-		ambig.PrintStatistics(
-			ChromsCount()==1 ? CID(Begin()) : Chrom::UnID,
-			"during expanding", false, _itemsCnt - rmvCnt, _itemsCnt
-		);
-	_itemsCnt -= rmvCnt;
+	if(rmvCnt) {		// get rid of items merked as removed 
+		vector<Featr> newItems;
+
+		newItems.reserve(_itemsCnt - allrmvCnt);
+		allrmvCnt = 0;
+		// filling newItems by valid values and correct their indexes in the chrom
+		for(cit=Begin(); cit!=End(); cit++) {	// loop through chroms
+			fit		= ItemsBegin(cit);
+			fitLast	= ItemsEnd(cit);
+			for(rmvCnt=0; fit!=fitLast; fit++)
+				if(fit->Start == UNDEFINED)		rmvCnt++;	// skip removed item
+				else			newItems.push_back(*fit);
+			cit->second.FirstInd -= allrmvCnt;				// correct indexes
+			cit->second.LastInd  -= (allrmvCnt += rmvCnt);
+		}
+		// replace instance items with new ones
+		_items.clear(); 
+		_items = newItems;
+	}
+	bool printed = ambig.Print(ChromsCount()==1 ? CID(Begin()) : Chrom::UnID,
+		"after extension", _itemsCnt, _itemsCnt - allrmvCnt);
+	PrintEOL(printed);
+	_itemsCnt -= allrmvCnt;
+	return true;
 }
 
 // Checks whether all features length exceed gien length, throws exception otherwise.
@@ -639,12 +737,14 @@ void BedF::Extend(int extLen, bool printStats)
 //	@sender: exception sender to print in exception message
 void BedF::CheckFeaturesLength(chrlen len, const string lenDefinition, const char* sender)
 {
-	ItemsIter fit;
-	for(cIter cit=Begin(); cit!=End(); cit++)
-		for(fit=ItemsBegin(cit); fit!=ItemsEnd(cit); fit++)
+	ItemsIter fit, fitLast;
+	for(cIter cit=Begin(); cit!=End(); cit++) {
+		fitLast = ItemsEnd(cit);
+		for(fit=ItemsBegin(cit); fit!=fitLast; fit++)
 			if(fit->Length()<len)
 				Err("Feature size " + NSTR(fit->Length()) +
 					" is less than stated " + lenDefinition + sBLANK + NSTR(len),sender).Throw();
+	}
 }
 
 /************************ end of class BedF ************************/
@@ -679,7 +779,7 @@ void Nts::Init(const string& fName, short minGapLen, bool fillNts, bool letN)
 	_len = pocket.ChromLength();
 	if( fillNts ) {
 		try { _nts = new char[_len]; }
-		catch(const bad_alloc&) { Err(Err::F_MEM, fName).Throw(); }
+		catch(const bad_alloc&) { Err(Err::F_MEM, fName.c_str()).Throw(); }
 		_len = 0;	// is accumulated while reading. Should be restore at the end
 	}
 	if( fillNts && !minGapLen && letN )	// fill nts without defRegions. First line is readed yet
@@ -693,11 +793,10 @@ void Nts::Init(const string& fName, short minGapLen, bool fillNts, bool letN)
 		_cntN = pocket.CountN();
 	}
 
-	if( file.IsBad() ) {
-		if(_nts)	delete [] _nts;
-		_nts = NULL;
-		Err(file.ErrCode(), fName).Throw();
-	}
+	//if( file.IsBad() ) {
+	//	if(_nts) { delete [] _nts; _nts = NULL; }
+	//	file.AbortInvalid();
+	//}
 	// set _commonDefRgn
 	if( !letN && _defRgns.Count() > 0 ) {
 		_commonDefRgn.Start = _defRgns.FirstStart();
@@ -770,11 +869,11 @@ BYTE ChromFiles::GetChromIDs(vector<string>& files, const string& gName, chrid c
 						name.insert(0, 1, '0');
 				}
 				else 
-					if( cID != cid ) { name = StrEmpty; wrongNamesCnt++; }
+					if( cID != cid ) { name = strEmpty; wrongNamesCnt++; }
 			}
-			else { name = StrEmpty; wrongNamesCnt++; }	// additional chrom's name
+			else { name = strEmpty; wrongNamesCnt++; }	// additional chrom's name
 		}
-		else { name = StrEmpty; wrongNamesCnt++; }		// some other .fa[.gz] file, not chrom
+		else { name = strEmpty; wrongNamesCnt++; }		// some other .fa[.gz] file, not chrom
 		files[i] = name;
 	}
 	sort(files.begin(), files.end());
@@ -870,7 +969,7 @@ chrid ChromFiles::SetTreated(const Bed* const bed)
 			sz = isZipped ?
 				FS::UncomressSize(fname.c_str()) :
 				FS::Size(fname.c_str());
-			if( sz < 0 )	Err(Err::F_OPEN, fname).Throw();
+			if( sz < 0 )	Err(Err::F_OPEN, fname.c_str()).Throw();
 			it->second.FileLen = chrlen(sz); 
 		}
 	return cnt;
@@ -919,9 +1018,10 @@ const string ChromSizes::Ext = ".sizes";
 //	@fName: name of file.sizes
 void ChromSizes::Init (const string& fName)
 {
-	TabFile file(fName, 2, true, TxtFile::READ, Chrom::Abbr);
+	TabFile file(fName, TxtFile::READ, 2, 2, Chrom::Abbr);
 	chrid cID;
 	ULONG cntLines;
+	// no needs to check since aborting invalid file is set
 	const char* currLine = file.GetFirstLine(&cntLines);
 	Reserve(chrid(cntLines));
 	for(; currLine; currLine = file.GetLine())
@@ -939,7 +1039,7 @@ void ChromSizes::Write(const string fName)
 	file.BeginWrite(Chrom::MaxNamedPosLength+1);
 
 	// needed to sort because of unoredictable order of chr size adding
-#ifdef _NO_HASHTABLE
+#ifdef _NO_UNODMAP
 	Sort();
 	for(cIter it=cBegin(); it!=cEnd(); it++)
 #else
@@ -1035,7 +1135,7 @@ bool	IsFilePattern	(const char* name)
 string GetPath	(const LPCTSTR name)
 {
 	const char* pch = strrchr(name, '/');
-	return pch ? string(name, pch-name+1) : StrEmpty;
+	return pch ? string(name, pch-name+1) : strEmpty;
 }
 
 // Fills vector by filenames according name template.
@@ -1105,15 +1205,15 @@ FileList::FileList(char* files[], short cntFiles) : _files(NULL), _memRelease(tr
 
 FileList::FileList(const char* fName) : _files(NULL), _memRelease(true)
 {
-	TabFile file(fName, 1, true, TxtFile::READ, NULL, TabFile::Comment);
+	TabFile file(fName, TxtFile::READ, 1, 1, NULL, TabFile::Comment);
 	ULONG cntLines;
 	char *dstStr;
 	const char *srcStr;
+	// no needs to check since aborting invalid file is set
 	const char *currLine = file.GetFirstLine(&cntLines);
 	vector<char*> tmpFiles;	// temporary vector because cntLines is not proof, but estimated capacity
 	
 	_count = 0;
-	if(currLine == NULL)	return;		// no real lines
 	tmpFiles.reserve(cntLines);
 	while(currLine!=NULL) {
 		srcStr = file.StrField(0);

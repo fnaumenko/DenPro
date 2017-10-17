@@ -64,6 +64,8 @@
 	#define retThreadValTrue	1
 
 	#define atol _atoi64
+	#define isnan _isnan
+
 	//#define SLASH '\\'		// standard Windows path separator
 	//#define REAL_SLASH '/'	// is permitted in Windows too
 #endif
@@ -110,24 +112,26 @@ typedef float readscr;		// type score of Read
 
 #define EOL '\n'		// 10
 #define CR	'\r'		// 13
-#define MSGSEP_TAB ":\t"	// message tab separator between subject and explanation
-#define MSGSEP_BLANK ": "	// message blank separator between subject and explanation
 
 using namespace std;
-static const char* WARNING = "NOTICE: ";
 
 static const string ZipFileExt = ".gz";
-static const string StrEmpty = "";
+static const string strEmpty = "";
+
+static const char* MsgDone = " done\t";
+static const char* Notice = "NOTICE: ";
 static const char* Total = "total";
 static const char* Version = "version";
+static const char* SepSC = "; ";		// semicolon separator
+static const char* SepC = ": ";			// colon separator
+static const char* SepCTab = ":\t";		// colon + tab separator
 #ifdef _ISCHIP
-static const char* GroupParSep = ";  ";		// option print: separator of option values in a group
-static const char* MsgFileAbsent = " is not exist. Generate...";
+static const char* SepGroup = ";  ";	// option print: separator of option values in a group
 #endif	// _ISCHIP
 #ifndef _WIGREG
 static const char* Template = "template";
 #endif
-static const char* MsgDone = " done\t";
+
 
 /*** COMMON MACROS & FUNCTION ***/
 
@@ -162,7 +166,7 @@ static const char* MsgDone = " done\t";
 BYTE DigitsCount (LLONG val);
 
 // Returns percent of @part relatively @total
-inline float	Percent(ULLONG part, ULLONG total) { 
+inline float Percent(ULLONG part, ULLONG total) { 
 	return total ? 100.f * part / total : 0.f;
 }
 
@@ -212,24 +216,20 @@ chrlen AlignPos(chrlen pos, BYTE res, BYTE relative);
 
 /*** end of COMMON FUNCTION ***/
 
+// 'Product' keeps Product info
 static struct Product
-/*
- * struct 'Product' keeps Product info
- */
 {
 	static const string	Title;
 	static const string	Version;
 	static const string	Descr;
 
 	// Gets length of product name (title plus version).
-	static inline BYTE NameLength() {
-		return BYTE(Title.length());		// + strlen(Version) + 1);
-	}
+	//static inline BYTE NameLength() { return BYTE(Title.length()); // + strlen(Version) + 1);
+	//}
 
 	// Gets title plus version.
-	static inline const string& Name() {
-		return Title;	// + string(1, HPH) + string(Version);
-	}
+	//static inline const string& Name() { return Title + string(1, HPH) + string(Version); }
+
 } product;
 
 static class Options
@@ -291,6 +291,7 @@ public:
 private:
 	// types of option values
 	// do not forget to support the correlation with Options::_TypeNames []
+	// tVERS option can be absent, so this 'special' group should be started by tHELP
 	enum eValType	{ tUNDEF, tNAME, tCHAR, tINT, tFLOAT, tLONG, tENUM, tCOMB, tHELP, tVERS };
 	
 	struct Signs {
@@ -299,12 +300,12 @@ private:
 
 	public:
 		static const BYTE Oblig		= 0x1;	// obligatory option sign
-		static const BYTE Recogn	= 0x2;	// recognized option sign 
+		static const BYTE Trimmed	= 0x2;	// trimmed option sign: true if option has already been processed
 		//static const BYTE Printed	= 0x4;	// printed option mask
 
 		inline Signs(int x)	{ signs = (BYTE)x; }	// to initialize obligatory in main()
 		// Returns true if given sign is set
-		bool inline Is(BYTE mark)		{ return signs & mark; }
+		bool inline Is(BYTE mark)		{ return (signs & mark) != 0; }	// '!= 0' to avoid warning
 		// Sets given sign
 		void inline MarkAs(BYTE mark)	{ signs |= mark; }
 	};
@@ -327,6 +328,7 @@ private:
 								// If enum option hase ValRequired==false,
 								// this pointer dousn't use and may be NULL
 		const char*	Descr;		// tip string
+		const char*	AddDescr;	// additional tip string
 
 		static const char EnumDelims[];	// specifies delimiter for enum [0] and combi [1] values
 
@@ -345,7 +347,9 @@ private:
 		//	return: -1 if option is obligatory but not stated, otherwise 1
 		int CheckOblig();
 
-		// Prints option with double blank before if descr==true, single blank otherwise.
+		// Prints option in full or short way.
+		//	@descr: if true, prints in full way: signature, description (marks as Required if needed), default value,
+		//	otherwise signature only
 		void Print(bool descr);
 
 	private:
@@ -418,7 +422,7 @@ private:
 	//	@val: value or NULL
 	//	@msg: error message about value
 	static int PrintWrongOpt(bool isWord, const char* opt, const char* val,
-		const string msg = StrEmpty);
+		const string msg = strEmpty);
 
 	// Ouptuts ambiguous option with error message to cerr
 	//	@isWord: true if option is long
@@ -437,32 +441,30 @@ class Err
 {
 public:
 	enum eCode {
-		NONE,
-		P_MISSED,
-		F_NON,
-		FD_NON,
-		F_MEM,
-		F_OPEN,
-		F_CLOSE,
-		F_READ,
-		F_WRITE,
-		F_BIGLINE,
-		F_NOREADREC,
-		FZ_MEM,
-		FZ_OPEN,
-		FZ_BUILD,
+		NONE,		// warning message
+		MISSED,		// something missed
+		F_NONE,		// no file
+		FD_NONE,	// nor file nor directory 
+		F_MEM,		// TxtFile(): memory exceeded
+		F_OPEN,		// TxtFile(): file open error
+		F_CLOSE,	// TxtFile(): file close error
+		F_READ,		// TxtFile(): file read error
+		F_BIGLINE,	// TxtFile(): too big line
+		FZ_MEM,		// TxtFile(): not enough gzip buffer
+		FZ_OPEN,	// TxtFile(): gzip open error
+		FZ_BUILD,	// TxtFile(): doen't support gzip
+		F_WRITE,	// file write error
+		//F_NOREADREC,
 #ifndef _FQSTATN
-		TF_FIELD,
-		TF_SPEC,
-		TF_EMPTY,
-		BP_BADEND,	// bed position: start is is equal or more than end
-		BP_NEGPOS,	// bed position: negative position
-		BP_EXCEED,	// bed position: exceeded chrom length
+		TF_FIELD,	// TabFile: number of fields is less than expected
+		//TF_SPEC,
+		TF_EMPTY,	// TabFile: none item (should be specified)
+		BP_BADEND,	// bed: start is is equal or more than end
+		BP_NEGPOS,	// bed: negative position
 #ifdef _BEDR_EXT
 		BR_RNAME,	// bed read: wrong read name format
 #endif
-		//BR_SIZE,
-		FA_LONGLEN,
+		//FA_LONGLEN,
 #endif
 #if defined(_ISCHIP) || defined(_FQSTATN)
 		FQ_HEADER,
@@ -473,21 +475,33 @@ public:
 #endif
 		EMPTY
 	};
+
+	//static const char* TREAT_BED_EXT;		// clarifying message in the bed stretch operation
 private:
 	static const char* _msgs[];
 	enum eCode	_code;			// error code
 	char * _outText;			// output message
-	//const char * _specifyText;		// aditional text to output message
 	
 	// Initializes _outText by C string contained message kind of
-	// "<@sender>: <@text> <@specifyText>".
+	// "<sender>: <text> <specifyText>".
 	void set_message(const char* sender, const char* text, const char* specifyText=NULL);
 
 	//inline void set_message(const string& sender, const char* text, const char* specifyText=NULL) {
-	//	set_message(sender==StrEmpty ? NULL : sender.c_str(), text, specifyText);
+	//	set_message(sender==strEmpty ? NULL : sender.c_str(), text, specifyText);
 	//}
 
 public:
+	// Returns string containing file name and issue number.
+	//	@issName: name of issue
+	//	@issNumb: number of issue
+	//	@fName: file name
+	static const string IssueNumbToStr(const string& issName, ULONG issNumb, const string& fName)
+	{
+		string res = fName;
+		if(fName != strEmpty)	res += SepSC;
+		return res + issName + BLANK + NSTR(issNumb);
+	}
+
 	// Gets message "no @fileName.@fileExt[.gz] files in this directory"
 	static const string MsgNoFiles (const string & fileName, const string fileExt)
 	{
@@ -497,48 +511,60 @@ public:
 
 	// Code-attached constructor.
 	//	@code: exception/warning message as code
-	//	@sender: name of object who has generated exception/warning
+	//	@sender: name of object who has generated exception/warning, or NULL if no sender
 	//	@specifyText: aditional text to specify exception/warning message
-	inline Err(eCode code, const string& sender=StrEmpty, const char* specifyText=NULL): _code(code) {
-		set_message(sender.c_str(), _msgs[code], specifyText);
+	inline Err(eCode code, const char* sender, const char* specifyText=NULL): _code(code) {
+		set_message(sender, _msgs[code], specifyText);
 	}
+
 	// Code-attached constructor.
 	//	@code: exception/warning message as code
-	//	@sender: name of object who has generated exception/warning
+	//	@sender: name of object who has generated exception/warning, or NULL if no sender
 	//	@specifyText: aditional text to specify exception/warning message
-	inline Err(eCode code, const string& sender, const string& specifyText) : _code(code) {
-		set_message(sender.c_str(), _msgs[code], specifyText.c_str());
+	inline Err(eCode code, const char* sender, const string& specifyText) : _code(code) {
+		set_message(sender, _msgs[code], specifyText.c_str());
 	}
+
 	// C-string-attached constructor.
 	//	@text: exception/warning message
 	//	@sender: name of object who has generated exception/warning
 	inline Err(const char* text, const char* sender=NULL) : _code(NONE) {
 		set_message(sender, text);
 	}
-	// String-attached constructor.
-	//	@text: exception/warning message
-	//	@sender: name of object who has generated exception/warning
-	inline Err(const string& text, const char* sender=NULL) : _code(NONE) {
-		set_message(sender, text.c_str());
-	}
+
 	// String-attached constructor.
 	//	@text: exception/warning message
 	//	@sender: name of object who has generated exception/warning
 	inline Err(const char* text, const string& sender) : _code(NONE) {
 		set_message(sender.c_str(), text);
 	}
+
+	// String-attached constructor.
+	//	@text: exception/warning message
+	//	@sender: name of object who has generated exception/warning
+	inline Err(const string& text, const char* sender=NULL) : _code(NONE) {
+		set_message(sender, text.c_str());
+	}
+
 	// String-attached constructor.
 	//	@text: exception/warning message
 	//	@sender: name of object who has generated exception/warning
 	inline Err(const string& text, const string& sender) : _code(NONE) {
 		set_message(sender.c_str(), text.c_str());
 	}
+
+	// empty constructor for silent quit
+	//inline Err() { set_message(NULL, strEmpty.c_str()); }
+
 	// copy constructor
 	Err(const Err& src);
 
 	inline ~Err() { if( _outText) delete [] _outText; }
 
-	inline const char* what() const throw() { return _outText;	}
+	inline const char* what() const { return _outText;	}
+	//inline const char* what() const throw() { return _outText;	}
+
+	//inline bool IsEmpty() const	{ return strlen(_outText)==0; }
 
 	inline eCode Code() const		{ return _code; }
 
@@ -552,13 +578,11 @@ public:
 	void	Throw(bool throwException = true, bool endOfLine = true);
 	
 	// Outputs warning with prefix "WARNING" and additional text, if it is setting.
-	void	Warning	(string const & addText = StrEmpty);
+	void	Warning	(string const & addText = strEmpty);
 };
 
+// 'FileSystem' implements common file system routines
 static class FS
-/*
- * Class 'FileSystem' implements common file routines 
- */
 {
 private:
 	// Returns true if file system's object exists
@@ -602,7 +626,7 @@ public:
 	//	otherwise outputs Err message as warning without EOL
 	//	return: true if file doesn't exist
 	inline static bool CheckFileExist	(const char* name, bool throwExcept = true) {
-		return CheckExist(name, S_IFREG, throwExcept, Err::F_NON);
+		return CheckExist(name, S_IFREG, throwExcept, Err::F_NONE);
 	}
 
 	// Checks if file or directory doesn't exist
@@ -611,7 +635,7 @@ public:
 	//	otherwise outputs Err message as warning without EOL
 	//	return: true if file or directory doesn't exist
 	static inline bool CheckFileDirExist	(const char* name, bool throwExcept = true) {
-		return CheckExist(name, S_IFDIR|S_IFREG, throwExcept, Err::FD_NON);
+		return CheckExist(name, S_IFDIR|S_IFREG, throwExcept, Err::FD_NONE);
 	}
 
 	// Throws exsception if file or directory doesn't exist
@@ -631,7 +655,7 @@ public:
 	//	@optsVal: Options char* value
 	//	return: pointer to the checked file name
 	static const char* CheckedFileDirName	(const char* name) {
-		if( !IsFileDirExist(name) )	Err(Err::FD_NON, name).Throw();
+		if( !IsFileDirExist(name) )	Err(Err::FD_NONE, name).Throw();
 		return name;
 	}
 
@@ -646,7 +670,7 @@ public:
 	//	@name: pointer to the file name
 	//	return: pointer to the checked file name
 	static const char* CheckedFileName	(const char* name) {
-		if( !IsFileExist(name) )	Err(Err::F_NON, name).Throw();
+		if( !IsFileExist(name) )	Err(Err::F_NONE, name).Throw();
 		return name;
 	}
 
@@ -717,10 +741,78 @@ public:
 
 } fs;
 
+struct TabFilePar {
+	const BYTE	MinFieldCnt;	// minimum number of feilds in file line
+	const BYTE	MaxFieldCnt;	// maximum used number of feilds in data line
+	const char* LineSpec;		// substring on which each data line is beginning
+	const char Comment;			// char indicates that line is comment
+
+	inline TabFilePar(BYTE	minTabCnt, BYTE maxTabCnt, const char* lSpec, char comm)
+		: MinFieldCnt(minTabCnt), MaxFieldCnt(maxTabCnt), LineSpec(lSpec), Comment(comm) {}
+};
+
+// 'File Type' implements bioinformatics file type routines 
+static class FT
+{
+	struct fType {
+		const char* Extens;			// file extension
+		const string Item;			// item title
+		const string ItemPl;		// item title in plural
+		TabFilePar FileParam;		// TabFile parameters, defined feilds
+	};
+	static const fType Types[];
+	static const BYTE	Count = 7;
+
+public:
+	enum eTypes {
+		UNDEF,	// undefined type
+		ABED,	// alignment bed
+		BED,	// ordinary bed
+		WIG,	// wiggle
+		SAM,	// sam
+		FQ,		// fastQ
+		FA		// fasta
+	};
+
+	// Gets file format
+	//	@fName: file name (with case insensitive extension)
+	static eTypes GetType(const char* fName);
+
+	// Validates file format
+	//	@fName: file name (with case insensitive extension and [.gz])
+	//	@t: file type
+	//	return: true if file extension correspondes to file type
+	static bool CheckType(const char* fName, eTypes t) { 
+		return GetType(fName) == (t == ABED ? BED : t); 
+	}
+
+	// Gets file extension
+	//	@t: file type
+	//	@isZip: true if add ".gz"
+	static const string Ext(eTypes t, bool isZip = false)	{ return Types[t].Extens; }
+#ifdef _ISCHIP
+	// Gets file extension, beginning at DOT and adding .gz if needed
+	//	@t: file type
+	//	@isZip: true if add ".gz"
+	static const string RealExt(eTypes t, bool isZip = false);
+#endif
+	// Gets an item's title
+	//	@t: file type
+	//	@pl: true if plural form
+	static const string& ItemTitle(eTypes t, bool pl = false)
+	{ return pl ? Types[t].ItemPl : Types[t].Item; }
+
+	// Gets TabFile params
+	//	@t: file type
+	static inline TabFilePar FileParams(eTypes t) { return Types[t].FileParam; }
+
+} fformat;
+
 class Timer
 {
 private:
-	time_t _startTime;
+	time_t	_startTime;
+	bool	_enabled;	// True if local timing is enabled
 	static clock_t	_StartCPUClock;
 
 	// Prints elapsed time interval
@@ -731,7 +823,7 @@ private:
 	static void PrintElapsed(const char *title, long elapsed, bool parentheses, bool isCarriageReturn);
 
 public:
-	// True if timing is enabled
+	// True if total timing is enabled
 	static bool		Enabled;
 
 	// Starts enabled CPU timer, if it is enabled
@@ -742,10 +834,11 @@ public:
 	static void StopCPU(bool isCarrgReturn=true);
 
 	// Creates a new Timer and starts it if timing is enabled
-	inline Timer()	{ Start(); }
+	//	@enabled: if true then set according total timing enabling
+	Timer(bool enabled = true)	{ _enabled = enabled ? Enabled : false; Start(); }
 	
 	// Restarts timer, if timing is enabled
-	inline void Start()				{ if( Enabled ) time( &_startTime ); }
+	inline void Start()				{ if( _enabled ) time( &_startTime ); }
 
 	// Stops enabled timer and print elapsed time with title
 	//	@title: string printed before time output
@@ -758,6 +851,9 @@ public:
 	//	@isCarrgReturn: if true then ended output by EOL
 	inline void Stop(bool parentheses = false, bool isCarrgReturn = true)	{
 		Stop(NULL, parentheses, isCarrgReturn); }
+
+	// True if instance timing is enabled
+	inline bool IsEnabled() const { return _enabled; }
 };
 
 
@@ -872,7 +968,7 @@ public:
 	};
 
 	// Returns true if parameter is signal coefficient
-	inline static bool IsS(eCC ecc)		{ return static_cast<bool>(ecc&ccS); }
+	inline static bool IsS(eCC ecc)		{ return (ecc&ccS) != 0; }
 	// Returns true if parameter is Pearson coefficient
 	inline static bool IsP(eCC ecc)		{ return static_cast<bool>(ecc&ccP); }
 	// Returns true if parameter is both coefficients
@@ -882,8 +978,8 @@ public:
 		return  !v1 && !v2 ? Undef : cov/(sqrt(v1) * sqrt(v2));	// not sqrt(v1*v2) 
 	}
 	inline static void Print(double val) {
-		if( val == Undef )	dout << "UNDEF";
-		else				dout << val;
+		if( val==Undef || isnan(val) )	dout << "UNDEFINED";
+		else	dout << val;
 	}
 } cc;
 
@@ -1023,10 +1119,7 @@ public:
 #endif // _BIOCC
 	{ Init(len); }
 
-	inline ~Array()		{ 
-		//if( _data )	cout << long(_data[0]);
-		//cout << "\tdestructor " << _len << EOL;
-		if(_data)	delete [] _data; }
+	inline ~Array()		{ if(_data)	delete [] _data; }
 	
 	inline bool Empty() const	{ return !_len; }
 
@@ -1044,7 +1137,7 @@ public:
 
 	// Deletes previous data and reserves array capacity, initialized by 0.
 	//	@len: capacity
-	inline void Reserve(long len)	{ 
+	void Reserve(long len)	{ 
 		if(_data)	delete [] _data;
 		Init(len);
 	}
@@ -1058,12 +1151,10 @@ public:
 	//	@start: position from which array should be added
 	//	@startSrc: start position in added array; start of added array by default
 	//	@size: length of added region; whole added array by default
-	inline void Concat(const Array& src, ULONG start, ULONG startSrc=0, ULONG size=0) {
+	void Concat(const Array& src, ULONG start, ULONG startSrc=0, ULONG size=0) {
 		if( !size )	size = src._len - startSrc;
 		if( start + size > _len )
-			Err(Err::ARR_OUTRANGE, "Array.Concat()", NSTR(_len)).Throw();
-			//Err("added arrays length " + NSTR(start + size) +
-			//sOutOfRange + NSTR(_len), "Array.Concat()").Throw();
+			Err(Err::ARR_OUTRANGE, "Array.Concat()", NSTR(start + size) + " > " + NSTR(_len)).Throw();
 		memcpy(_data + start, src._data + startSrc, size*sizeof(T));
 	}
 
@@ -1072,7 +1163,7 @@ public:
 	//	@end: last position of subarray
 	//	@val: value to fill
 	void Fill(long begin, long end, T val) {
-		if( end > _len )
+		if( end > long(_len) )
 			Err(Err::ARR_OUTRANGE, "Array.Fill()", NSTR(_len)).Throw();
 		for(long i=begin; i<=end; i++)
 			_data[i] = val;
@@ -1257,6 +1348,7 @@ public:
 	static const BYTE	MaxAbbrNameLength;		// Maximal length of abbreviation chrom's name
 	static const BYTE	MaxNamedPosLength;	// Maximal length of named chrom's position 'chrX:12345'
 	static const char*	Abbr;				// Chromosome abbreviation
+	static const char*	Short;				// Chromosome shortening
 	static const string	Title;				// Chromosome title
 
 	// Gets chromosome's ID stated by user
@@ -1298,14 +1390,19 @@ public:
 		return cID != UnID ? (cID < M ? (BSTR(cID)) : string(1, cID)) : UndefName;
 	}
 
-	// Gets chromosome's abbreviation name (with prefix 'chr') by its ID.
+	// Gets chromosome's abbreviation name 'chrX' by its ID.
 	inline static string AbbrName(chrid cID)	{ return Abbr + Name(cID); }
 
-	// Gets chromosome's title name (with prefix 'chromosome') or plural
+	// Gets chromosome's shortening name 'chrom X'
+	//	@cID: chromosome's ID
+	inline static string ShortName(chrid cID)	{ return Short + Name(cID); }
+
+	// Gets chromosome's title name 'chromosome X' or 'chromosomes'
 	//	@cID: chromosome's ID or UnID if plural
 	inline static string TitleName(chrid cID = UnID)	{ 
 		return Title + (cID==UnID ? "s" : (sBLANK + Name(cID)));
 	}
+
 	// Gets chromosome's ID by abbreviation name (with prefix 'chr')
 	inline static chrid IDbyAbbrName(const char* cAbbrName) { return ID(cAbbrName, strlen(Abbr)); }
 
@@ -1318,7 +1415,8 @@ public:
 
 	// Gets the length of short chromosome's name by ID
 	static inline BYTE NameLength(chrid cID) {
-		return cID != UnID ? (cID < M ? (cID < 10 ? 1 : 2) : 1) : strlen(UndefName);
+		return cID == UnID ? strlen(UndefName) : (cID >= 10 && cID < M ? 2 : 1);
+		//return cID != UnID ? (cID < M ? (cID < 10 ? 1 : 2) : 1) : strlen(UndefName);
 	}
 
 	//// Gets the length of abbreviation chromosome's name by ID
@@ -1338,6 +1436,11 @@ public:
 
 	//static char* LongToShortName(char* longName) ;
 } chrom;
+
+#if defined _DENPRO || defined _BIOCC
+static string sNoCommonChroms = "no common chroms\n";
+	//"no common " + Chrom::Title + 's' + EOL;
+#endif	// _DENPRO || _BIOCC
 
 #if !defined _WIGREG && !defined _FQSTATN
 

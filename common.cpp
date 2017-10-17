@@ -114,13 +114,13 @@ const char*	Missing = "missing ";
 const char* Options::Booleans [] = {"OFF", "ON"};
 
 const char* Options::_TypeNames [] = {
-	StrEmpty.c_str(), "<name>", "<chars>", "<int>", "<float>", "<long>",
-	StrEmpty.c_str(), StrEmpty.c_str(), StrEmpty.c_str(), StrEmpty.c_str()
+	strEmpty.c_str(), "<name>", "<chars>", "<int>", "<float>", "<long>",
+	strEmpty.c_str(), strEmpty.c_str(), strEmpty.c_str(), strEmpty.c_str()
 };
 
 const char Options::Option::EnumDelims [] = {'|', ','};
 
-#define DESCR_SHIFT	3		// number of TABs before decsriptions
+#define DESCR_SHIFT	3		// number of TABs before decsription field
 #define ENUM_REPLACE '?'	// symbol in description that is replaced by enum value
 
 const string sValue = "value";
@@ -201,13 +201,13 @@ int Options::Option::SetVal(bool isWord, char* opt, char* val, bool isNextOpt)
 	if( isWord ) { if(Str==NULL || strcmp(Str, opt))	return -1; }
 	else if(Char != *opt)	return -1;
 
-	if(Sign.Is(Signs::Recogn))	return PrintAmbigOpt(isWord, opt, "Duplicated", NULL);
+	if(Sign.Is(Signs::Trimmed))	return PrintAmbigOpt(isWord, opt, "Duplicated", NULL);
 	// check value existence
 	bool noVal = val==NULL || val[0]==HPH;	// true if no value
 	if(ValRequired())	{ if(noVal)	return PrintWrongOpt(isWord, opt, NULL, sValue + " required"); }
 	else if(!noVal&&isNextOpt)	return PrintWrongOpt(isWord, opt, NULL, sValue + " prohibited");
 
-	Sign.MarkAs(Signs::Recogn);
+	Sign.MarkAs(Signs::Trimmed);
 	switch(ValType) {
 		case tENUM:	return SetEnum(val) ? 0 : PrintWrongOpt(isWord, opt, val);
 		case tCOMB:	return SetComb(val) ? 0 : PrintWrongOpt(isWord, opt, val);
@@ -251,7 +251,7 @@ int Options::Option::SetTriedDigit(double val, bool isWord)
 	if( outOfLimit >= 0 ) {
 		const char* sign[] = {"less", "more"};
 		cerr << OptTitle << OptToStr(isWord, isWord ? Str : &Char);
-		cerr << MSGSEP_BLANK << sValue << setprecision(4) << BLANK << val
+		cerr << SepSC << sValue << setprecision(4) << BLANK << val
 				<< " is " << sign[outOfLimit] << " than permissible " 
 				<< (!outOfLimit ? MinNVal: MaxNVal ) << EOL;
 		return 1;
@@ -301,61 +301,68 @@ bool Options::Option::SetComb(char* vals)
 	return ret;
 }
 
-// Prints option with double blank before if descr==true, single blank otherwise.
+// Prints option in full or short way.
+//	@descr: if true, prints in full way: signature, description (marks as Required if needed), default value,
+//	otherwise signature only
 void Options::Option::Print(bool descr)
 {
-	BYTE cntChars = 0;
-	if(descr)	{ cout << BLANK;	cntChars++;	}
-	//Option& sopt = _Options[i];
-	// PRINT OPTION
-	cout << BLANK << HPH << Char;	cntChars += 3;
+	USHORT	len = 0;		// first len is used as counter of printed chars
+	bool	fixValType = ValType==tENUM || ValType==tCOMB;
+
+	if(descr)	{ cout << BLANK;	len++;	}	// full way: double blank first
+	// ** signature
+	cout << BLANK << HPH << Char;	len += 3;
 	if(Str)	{
-		if(Char != HPH) {	cout << "|--";	cntChars += 3; }
+		if(Char != HPH) {	cout << "|--";	len += 3; }
 		cout << Str;
-		cntChars += strlen(Str);
+		len += strlen(Str);
 	}
-	// PRINT OPTION'S VALUE 
-	if( ValType == tENUM ||  ValType == tCOMB )
-		cntChars += PrintEnumVals();
+	// ** option values
+	if(fixValType)
+		len += PrintEnumVals();
 	else {
 		const char* tname = _TypeNames[ValType];
 		cout << BLANK << tname;
-		cntChars += 1 + strlen(tname);
+		len += 1 + strlen(tname);
 	}
-	// PRINT DESCSIPTION
-	if( descr ) {
+	// ** description
+	if(descr) {
+		short cnt = DESCR_SHIFT - len / 8;	// 3*8: right boundary of descriptions
 		// align description 
-		short cnt = DESCR_SHIFT - cntChars / 8;	// 3*8: right boundary of descriptions
-		if( !cnt )						cout << TAB;
-		else if( cnt > 0 )
-			for(BYTE i=0; i<cnt; i++)	cout << TAB;
+		//if(cnt <= 0 && !(len % 8))	cnt = 1;
+		if(!cnt || (cnt<0 && !(len % 8)))	cnt = 1;
+		//if(cnt <= 0 && !(len % 8))	cnt = 1;
+		for(BYTE i=0; i<cnt; i++)	cout << TAB;
 
 		// print description
 		cnt = 0;	// use as external enum counter
-		char* buffer = new char[strlen(Descr) + 1];
+		len = strlen(Descr);	// from now len is used as length of description string
+		char* buffer = new char[len+1];
 		PrintSubLine(
 			buffer,
-			//new char[strlen(Descr) + 1],
 			Descr,
 			strchr(Descr, EOL), 
-			ValType == tENUM || ValType == tCOMB ? (const char**)SVal : NULL, 
+			fixValType ? (const char**)SVal : NULL, 
 			&cnt
 		);
 		delete [] buffer;
+		if(AddDescr) {
+			if(Descr[len-1] != EOL)	cout << BLANK;
+			cout << AddDescr;
+		}
+		if(Sign.Is(Signs::Oblig))	cout << " Required";
+		else if(ValType >= tHELP)	cout << " and exit";
 
-		// print DEFAULT
-		if( ValRequired() && NVal != vUNDEF )
-			if( ValType == tENUM || ValType == tCOMB ) {
+		// print default value
+		if(ValRequired() && NVal != vUNDEF)
+			if(fixValType) {
 				if( NVal >= MinNVal )	// do not print default if it is never set by user
 					PRINT_IN_PRTHS(	((char**)SVal)
 						[int(NVal)-int(MinNVal)] );	// offset by min enum value
 			}
-			else if(ValType == tCHAR)
-				PRINT_IN_PRTHS(char(NVal));
-			else
-				PRINT_IN_PRTHS(NVal);
-		else if( SVal != NULL )
-			PRINT_IN_PRTHS(ValType == tENUM ? "NONE" : SVal);
+			else if(ValType == tCHAR)	PRINT_IN_PRTHS(char(NVal));
+			else						PRINT_IN_PRTHS(NVal);
+		else if( SVal != NULL )			PRINT_IN_PRTHS(ValType == tENUM ? "NONE" : SVal);
 		cout << EOL;
 	}
 }
@@ -364,19 +371,20 @@ void Options::Option::Print(bool descr)
 //	return: number of printed symbols
 BYTE Options::Option::PrintEnumVals()
 {
-	if( ValRequired() ) {
-		char** vals = (char**)SVal;
-		BYTE wCnt = BYTE(MaxNVal),
-			 cCnt = BYTE(strlen(vals[0]));
-		cout << " <" << vals[0];
-		for(BYTE i=1; i<wCnt; i++) {
-			cout << EnumDelims[ValType-tENUM] << vals[i];
-			cCnt += strlen(vals[i]);
-		}
-		cout << '>';
-		return cCnt + wCnt + 2;
+	if( !ValRequired() )	return 0;
+
+	char** vals = (char**)SVal;			// array of val images
+	BYTE len  = BYTE(strlen(vals[0]));	// number of printed chars
+	BYTE vCnt = BYTE(MaxNVal);			// number of values
+	if(MinNVal)							// is range of values limited from below?
+		vCnt -= BYTE(MinNVal) - 1;
+	cout << " <" << vals[0];			// first val image from array of val images
+	for(BYTE i=1; i<vCnt; i++) {
+		cout << EnumDelims[ValType-tENUM] << vals[i];
+		len += strlen(vals[i]);
 	}
-	return 0;
+	cout << '>';
+	return len + vCnt + 2;	// here vCnt denotes the number of printed delimiters
 }
 
 // Performs a case-insensitive search of given string value among enum values.
@@ -441,7 +449,7 @@ int	Options::PrintVersion()
 int Options::PrintWrongOpt(bool isWord, const char* opt, const char* val, const string msg)
 {
 	cerr << OptTitle << OptToStr(isWord, opt)
-		 << MSGSEP_BLANK << (msg == StrEmpty ? "wrong " + sValue : msg);
+		 << SepSC << (msg == strEmpty ? "wrong " + sValue : msg);
 	if( val ) cerr << BLANK << val;
 	cerr << EOL;
 	return 1;
@@ -455,7 +463,7 @@ int Options::PrintWrongOpt(bool isWord, const char* opt, const char* val, const 
 int Options::PrintAmbigOpt(bool isWord, const char* opt, const char* headMsg, const char* tailMsg)
 {
 	cerr << headMsg << optTitle << OptToStr(isWord, opt);
-	if( tailMsg )	cerr << MSGSEP_BLANK << tailMsg;
+	if( tailMsg )	cerr << SepSC << tailMsg;
 	cerr << EOL;
 	return 1;
 }
@@ -559,73 +567,57 @@ int Options::Tokenize(int argc, char* argv[], const char* obligPar)
 
 /************************ class Err ************************/
 
+//const char* Err::TREAT_BED_EXT = "after extension";	// clarifying message in the bed stretch operation
+
 const char* Err::_msgs [] = {
-/* NONE */		"WARNING: ",//WARNING,
-/* P_MISSED */	"missing",
-/* F_NON */		"no such file",
-/* FD_NON */	"no such file or directory",
+/* NONE */		"WARNING",//WARNING,
+/* MISSED */	"missing",
+/* F_NONE */	"no such file",
+/* FD_NONE */	"no such file or directory",
 /* F_MEM */		"memory exceeded",
 /* F_OPEN */	"could not open",
 /* F_CLOSE */	"could not close",
 /* F_READ */	"could not read",
-/* F_WRITE */	"could not write",
 /* F_BIGLINE */	"buffer is less than length of line",
-/* F_NOREADREC*/"attempt to get record's info without reading record",
-/* FZ_MEM */	"wrong setting internal gzip buffer",
+/* FZ_MEM */	"not enough internal gzip buffer",
 /* FZ_OPEN */	"wrong reading mode ALL for zipped file",
 /* FZ_BUILD */	"this build does not support zipped files",
+/* F_WRITE */	"could not write",
+///* F_NOREADREC*/"attempt to get record's info without reading record",
 #ifndef _FQSTATN
-/* TF_FIELD */	"wrong format: number of fields is less than expected",
-/* TF_SPEC */	"wrong line format",
+/* TF_FIELD */	"number of fields is less than expected",
+///* TF_SPEC */	"wrong line format",
 /* TF_EMPTY */	"no",
-/* BP_BADEND */	"'start' position is equal or more than 'end'",
-/* BP_NEGPOS */	"negative position is not allowed",
-/* BP_EXCEED */	"position exceeds chromosome length",
+/* BP_BADEND */		"'start' position is equal or more than 'end'",
+/* BP_NEGPOS */		"negative position",
 #ifdef _BEDR_EXT
 /* BR_RNAME */	"wrong read name format:",
 #endif
-///* BR_SIZE */	"different size of read",
-/* FA_LONGLEN */"length of chromosome is more than ULONG_MAX",
+///* FA_LONGLEN */"length of chromosome is more than ULONG_MAX",
 #endif
-#if defined(_ISCHIP) || defined(_FQSTATN)
+#if defined _ISCHIP || defined _FQSTATN
 /* FQ_HEADER */	"no '@' marker; miss header line",
 /* FQ_HEADER2 */"no '+' marker; miss second header line",
 #elif defined _DENPRO || defined _BIOCC
-/* ARR_OUTRANGE */	" is out of range",
+/* ARR_OUTRANGE */	"out of range",
 /* SUM_EXCEED */	"exceeded digital limit while S calculated. Anormous density. Calculate P only",
 #endif
 /* EMPTY */		""
 };
 
-// Initializes _outText by cstring contained message kind of "<@sender>: <@text> <@specifyText>".
-//void Err::set_message(const string& sender, const char *text, const char *specifyText)
-//{
-//	size_t size = sender.size() + strlen(text) + 1;
-//	//size_t size0 = size;
-//	if( sender.size() )	size += strlen(MSGSEP_BLANK);
-//	if( specifyText )	size += strlen(specifyText) + 1;
-//	_outText = new char[size];
-//	strcpy(_outText, sender.c_str());
-//	if( sender.size() )
-//		strcat(_outText, MSGSEP_BLANK);
-//	strcat(_outText, text);
-//	if( specifyText ) {
-//		strcat(_outText, sBLANK);
-//		strcat(_outText, specifyText);
-//	}
-//}
-
+// Initializes _outText by cstring contained message kind of "<sender>: <text> <specifyText>".
 void Err::set_message(const char* sender, const char *text, const char *specifyText)
 {
-	size_t senderLen = sender ? strlen(sender) : 0;
-	size_t outLen = senderLen + strlen(text) + 1;
-	if(senderLen)	outLen += strlen(MSGSEP_BLANK);
+	size_t senderLen = sender!=NULL ? strlen(sender) : 0;
+	size_t textLen = strlen(text);
+	size_t outLen = senderLen + textLen + 1 + strlen(SepSC);
 	if(specifyText)	outLen += strlen(specifyText) + 1;
 	_outText = new char[outLen];
 	memset(_outText, '\0', outLen);
-	if(senderLen) {
-		strcpy(_outText, sender);
-		strcat(_outText, MSGSEP_BLANK);
+	if(sender) {
+		if(senderLen)
+			strcpy(_outText, sender);
+		strcat(_outText, SepC);
 	}
 	strcat(_outText, text);
 	if(specifyText) {
@@ -644,20 +636,24 @@ Err::Err(const Err & src)
 }
 
 void Err::Throw(bool throwException, bool endOfLine) {
-	if( throwException )	
+	if( throwException )
 		throw *this;
 	else {		
 		dout << _outText;
-		if( endOfLine )		dout << EOL;
+		if(endOfLine)		dout << EOL;
+		fflush(stdout);
 	}
 }
 
 // Outputs warning with prefix "WARNING" and additional text, if it is setting.
 void Err::Warning(string const& addText) {
-	dout << _msgs[ErrWARNING] << _outText;
+	dout << _msgs[ErrWARNING];
+	if(_outText[0] != ':') dout << SepC;	// check if sender is not recorded
+	dout << _outText;
 	if( !addText.empty() )	
 		dout << addText;
 	dout << EOL;
+	fflush(stdout);
 }
 
 /************************ end of class Err ************************/
@@ -733,14 +729,14 @@ bool FS::HasExt	(const string& fname, const string& ext)
 //	return: string containing real file extension or empty string if no real extention
 string const FS::GetExt(const char* fname) {
 	const char * pdot = strrchr(fname, DOT);
-	if( !pdot )		return StrEmpty;
+	if( !pdot )		return strEmpty;
 	if( strcmp(pdot, ZipFileExt.c_str()) )
 		return string(pdot+1);				// no zip extention
 	const char * pprevdot = pdot - 1;
 	for(; pprevdot >= fname; pprevdot--)	// find previous DOT
 		if( *pprevdot == DOT )	
 			break;
-	return pprevdot+1 == fname ? StrEmpty : string(pprevdot+1, pdot-pprevdot-1);
+	return pprevdot+1 == fname ? strEmpty : string(pprevdot+1, pdot-pprevdot-1);
 }
 
 // Returns file name without extentiom (slash|back-slash insensible)
@@ -863,6 +859,43 @@ bool FS::GetFiles	(vector<string>& files, const string& dirName,
 #endif	// _WIGREG
 /************************ end of class FileSystem ************************/
 
+/************************ class FileFormat ************************/
+
+const FT::fType FT::Types[] = {
+	{ "", strEmpty, strEmpty,			TabFilePar( 0, 0, NULL, '\0') },
+	{ "bed", "read",	"reads",		TabFilePar( 6, 6, Chrom::Abbr, '#') },
+	{ "bed", "feature", "features",		TabFilePar( 3, 6, Chrom::Abbr, '#') },
+	{ "wig", "interval", "intervals",	TabFilePar( 2, 2, NULL, '#') },
+	{ "sam", strEmpty, strEmpty,		TabFilePar( 0, 0, NULL, '#') },
+	{ "fq", strEmpty, strEmpty,			TabFilePar( 0, 0, NULL, '\0') },
+	{ "fa", strEmpty, strEmpty,			TabFilePar( 0, 0, NULL, '\0') }
+};
+
+// Returns file format
+//	@fName: file name (with case insensitive extension)
+FT::eTypes FT::GetType(const char* fName)
+{
+	const string ext = FS::GetExt(fName);
+	const char* c_ext = ext.c_str();
+	for(int i = 2; i<Count; i++)	// start from ordinary bed
+		if(!_stricmp(c_ext, Types[i].Extens))	return eTypes(i);
+	return UNDEF;
+}
+
+#ifdef _ISCHIP
+// Gets file extension, beginning at DOT and adding .gz if needed
+//	@t: file type
+//	@isZip: true if add ".gz"
+const string FT::RealExt(eTypes t, bool isZip)
+{
+	string ext = string(".") + Types[t].Extens;
+	if(isZip)	ext += ZipFileExt;
+	return ext;
+}
+#endif
+
+/************************ end of class FileFormat ************************/
+
 /************************  class Timer ************************/
 bool	Timer::Enabled = false;
 clock_t	Timer::_StartCPUClock;
@@ -902,7 +935,7 @@ void Timer::StopCPU(bool isCarrgReturn)
 //	@isCarrgReturn: if true then ended output by EOL
 void Timer::Stop(const char *title, bool parentheses, bool isCarrgReturn)
 {
-	if( Enabled ) {
+	if( _enabled ) {
 		time_t stopTime;
 		time( &stopTime );
 		PrintElapsed(title, (long)difftime(stopTime, _startTime), parentheses, isCarrgReturn);
@@ -1007,7 +1040,7 @@ bool CCaggr::IncreaseSVar(BYTE i, ULLONG val, chrid cID)
 	if(val) {
 		check = VarS[i];
 		if((VarS[i] += val) <= check) {
-			Err(Err::SUM_EXCEED, Chrom::AbbrName(cID)).Warning();
+			Err(Err::SUM_EXCEED, Chrom::AbbrName(cID).c_str()).Warning();
 			VarS[0] = Undef;
 			return true;
 		}
@@ -1033,6 +1066,7 @@ bool CCaggr::IncreaseSVars(ULLONG x, ULLONG y, chrid cID)
 /************************ class Chrom ************************/
 
 const char*		Chrom::Abbr = "chr";
+const char*		Chrom::Short = "chrom ";
 const char*		Chrom::UndefName = "UNDEF";
 const string	Chrom::Title = "chromosome";
 const BYTE		Chrom::MaxAbbrNameLength = BYTE(strlen(Chrom::Abbr)) + MaxShortNameLength;
@@ -1188,13 +1222,13 @@ int Read::CheckNLimit(const char* read)
 void Read::Print()
 {
 	cout << "Read: length = " << int(Len)
-		 << GroupParSep << "name includes a " << (NameType==nmPos ? "position" : "number")
-		 << GroupParSep << "FQ quality = " << SeqQuality
-		 << GroupParSep << "map quality = " << int(MapQuality)
-		 << GroupParSep << "N-limit = ";
+		 << SepSC << "name includes a " << (NameType==nmPos ? "position" : "number")
+		 << SepSC << "FQ quality = " << SeqQuality
+		 << SepSC << "map quality = " << int(MapQuality)
+		 << SepSC << "N-limit = ";
 	if( LimitN == vUNDEF )	cout << Options::GetBoolean(false);
 	else					cout << LimitN;
-	cout << GroupParSep << "limit = " << MaxCount;
+	cout << SepSC << "limit = " << MaxCount;
 }
 
 #endif

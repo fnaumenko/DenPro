@@ -5,7 +5,7 @@ enum optValue {
 	oGFILE,
 	oGAPLEN,
 	oDUPL,
-	oDIFFSZ,
+	//oDIFFSZ,
 	oCHROM,
 	oMINSCR,
 	oCONS,
