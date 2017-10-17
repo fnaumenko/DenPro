@@ -1,5 +1,5 @@
 PROG=DenPro
-COPT=-c -D_NO_HASHTABLE# -D_NO_ZLIB# uncomment last macro if no ZLIB on your system
+COPT=-c #-D_NO_ZLIB# uncomment last macro if no ZLIB on your system
 LOPT=-lz# comment this option if no ZLIB on your system
 SRC=$(wildcard *.cpp)
 HDR=$(wildcard *.h)
