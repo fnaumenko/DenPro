@@ -1,8 +1,8 @@
 # DenPro
 Fast software that calculates <b>Den</b>sity <b>Pro</b>file and precise mean density of aligned DNA sequence into inside and outside given regions.<br>
 *Density profile* means a set of frequencies of the observed equal parts of the sequence with the same density. 
-The program splits each given region into equal non-overlapping parts (windows), 
-and then counts the number of windows with the same density.<br>
+The program splits each given region into non-overlapping equal parts (windows), 
+and then counts the number of windows containing the same number of reads.<br>
 *Precise* means that all the undefined regions in the reference genome (i.e. regions filled by running ambiguous reference characters ‘N’) are excluded from consideration.<br>
 If the input regions are not defined, then only mean density is calculated for each chromosome.
 
