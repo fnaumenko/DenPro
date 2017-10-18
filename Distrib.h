@@ -91,6 +91,13 @@ public:
 	// default constructor needed for base Chroms collection
 	inline PairReadDistrib() {};
 
+	// default constructor needed for base Chroms collection
+	PairReadDistrib(const PairReadDistrib& d) {
+		_wLen = d._wLen;
+		_halfRLen = d._halfRLen;
+		_rCnt = 0;
+	};
+
 	// Creates new instance by chrom, BedR, and regions
 	//	@cID: chromosome's ID
 	//	@bedR: BedR for what distribution should be builded

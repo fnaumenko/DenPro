@@ -22,11 +22,13 @@ const string Product::Descr = "Density Profile";
 const string OutFile = Product::Title +  "_out.txt";
 const string HelpOutFile = "duplicate standard output to " + OutFile + " file";
 
+const char*	ProgParam = "sequence";	// program parameter
+
 enum eOptGroup	{ oINPUT, oTREAT, oOUTPUT, oOTHER };	// oOTHER should be the last 
 const BYTE	Options::_GroupCount = oOTHER + 1;
+const BYTE	Options::_OptCount = oHELP + 1;
 
 const char* Options::_OptGroups [] = { "Input", "Treatment", "Output", "Other" };
-
 // --info option: types of info notations
 const char* infos [] = { "NM", "CNT", "STAT" };	// corresponds to eInfo; iNONE and iLAC are hidden
 
@@ -64,10 +66,9 @@ Options::Option Options::_Options [] = {
 	{ 'h', "help",	0,	tHELP,	oOTHER,	vUNDEF, vUNDEF, 0, NULL, "print usage information", NULL }
 };
 
-const BYTE	Options::_OptCount = oHELP + 1;
 const BYTE	Options::_UsageCount = 1;		// count of 'Usage' variants in help
 const Options::Usage Options::_Usages[] = {	// content of 'Usage' variants in help
-	{	vUNDEF,	" sequence"	}
+	{ vUNDEF, ProgParam, true, "alignment in bed format" }
 };
 
 ofstream outfile;			// file ostream duplicated cout; inizialised by file in code
@@ -77,8 +78,9 @@ dostream dout(cout, outfile);	// stream's duplicator
 int main(int argc, char* argv[])
 {
 	if (argc < 2)	return Options::PrintUsage(false);			// output tip
-	int fileInd = Options::Tokenize(argc, argv);
+	int fileInd = Options::Tokenize(argc, argv, ProgParam);
 	if( fileInd < 0 )	return 1;								// wrong option
+
 	if(!Chrom::SetStatedID(Options::GetSVal(oCHROM))) return 1;	// wrong chrom name
 
 	int ret = 0;						// main() return code
@@ -101,10 +103,10 @@ int main(int argc, char* argv[])
 			templ->Extend(Options::GetIVal(oEXTLEN), cSizes, info);
 			templ->CheckFeaturesLength(Options::GetIVal(oSPACE), "space", "template");
 		}
-		BedR align("alignment", aName, cSizes, info, true, true, alarm,
+		BedR align(ProgParam, aName, cSizes, info, true, true, alarm,
 			Options::GetBVal(oDUPL), Options::GetIVal(oMINSCR));
 		if( templ && !SetCommonChroms(align, *templ, false) )
-			Err("no common chromosomes").Throw();
+			Err(sNoCommonChroms).Throw();
 		dout << EOL;
 		
 		DenPro(align, gRgns, templ);
