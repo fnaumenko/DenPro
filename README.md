@@ -40,7 +40,7 @@ To be sure about **zlib** on your system, type ```whereis zlib```.
 ## Usage
 ```DenPro [options] -g|--gen <name> sequence```
 
-## Help
+### Help
 ```
 Input:
   -g|--gen <name>       chromosome sizes file, reference genome library, or single nucleotide sequence. Required
