@@ -3,7 +3,7 @@
 
 class PairReadDistrib;		// forward declaration used in ReadDistrib
 
-class ReadDistrib : public arrchrlen
+class ReadDistrib : public Array<chrlen>
 /*
  * 'ReadDistrib' represents simple distribution of Reads,
  * that's a number of Reads in each cutting window. Windows are indexed from 0 to maxWinCnt

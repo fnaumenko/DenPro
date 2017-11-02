@@ -44,7 +44,7 @@ Options::Option Options::_Options [] = {
 	"accept duplicate reads", NULL },
 	//{ HPH, "diff-sz",	0,	tENUM,	oINPUT, FALSE,	0, 2, (char*)Options::Booleans,
 	//"allow to ignore reads with different size", NULL },
-	{ 'c', Chrom::Abbr,	0,	tCHAR,	oTREAT, vUNDEF, 0, 0, NULL,
+	{ 'c', Chrom::Abbr,	0,	tNAME,	oTREAT, vUNDEF, 0, 0, NULL,
 	"treat specified chromosome only", NULL },
 	{ HPH, "min-scr",	0,	tINT,	oTREAT, vUNDEF, 0, 1000, NULL,
 	"score threshold for treated reads", NULL },
@@ -105,8 +105,7 @@ int main(int argc, char* argv[])
 		}
 		BedR align(ProgParam, aName, cSizes, info, true, true, alarm,
 			Options::GetBVal(oDUPL), Options::GetIVal(oMINSCR));
-		if( templ && !SetCommonChroms(align, *templ, false) )
-			Err(sNoCommonChroms).Throw();
+		if(templ)	align.SetCommonChroms(*templ, false, true);
 		dout << EOL;
 		
 		DenPro(align, gRgns, templ);
