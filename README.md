@@ -48,7 +48,7 @@ Input:
                         Ignored for the genome size file [1000]
   -d|--dupl <OFF|ON>    accept duplicate reads [ON]
 Treatment:
-  -c|--chr <chars>      treat specified chromosome only
+  -c|--chr <name>       treat specified chromosome only
   --min-scr <int>       score threshold for treated reads
   --cons <int>          step of number of consolidated reads
   -f|--fbed <name>      'template' bed file which features define treated regions
@@ -113,9 +113,10 @@ Default: 1000
 Accept or deny duplicated reads to participate in density calculation.<br>
 Default: ```ON```
 
-```-c|--chr <chars>```<br>
-Treat specified chromosome only. Samples of option’s value: 1, 20, X.<br>
-Reduces run time on 1.5-20 times depending on how far this chromosome is placed in an alignment.<br>
+```-c|--chr <name>```<br>
+Treat specified chromosome only. 
+```name``` means short chromosome name, i.e. number or  character, for instance ```–c 10```, ```--chr X```.<br>
+The indication of one chromosome reduces run time on 1.5-20 times depending on how far this chromosome is placed in an alignment.
 
 ```--min-scr <int>```<br>
 Score threshold for treated reads. 
