@@ -54,7 +54,7 @@ Options::Option Options::_Options [] = {
 	"'template' bed file which features define treated regions", NULL },
 	{ 'e',"ext-len",0,	tINT,	oTREAT, 0,	0, 1e3, NULL,
 	"length by which the features in the 'template' bed file\nwill be extended in both directions before treatment", NULL },
-	{ 's',"space",	0,	tINT,	oTREAT, 100, 2, 1e4, NULL,
+	{ 's',"space",	0,	tINT,	oTREAT, 200, 2, 1e4, NULL,
 	"resolution: span in bp by which reads will be counted\nto define a density", NULL },
 	{ 'i', "info",	0,	tENUM, oOUTPUT,	Obj::iEXT, Obj::iNM, Obj::iSTAT, (char*)infos,
 	"print information about file:\n? - name only, ? - number of reads, ? - statistics", NULL },
@@ -403,19 +403,19 @@ void DenPro::Print(ofstream& stream)	//, bool printTwoDistribs)
 ////	for Out-peak has been inverted and ovarlaped with chrom defined Regions.
 //PairReadDistrib::PairReadDistrib(chrid cID, const BedR &bedR, const Regions &defRegns, const BedF *bedF) :
 //	_halfRLen( bedR.ReadLen()/2 ),
-//	_beginIt( bedR.ReadsBegin(cID) ),
+//	_firstRit( bedR.ReadsBegin(cID) ),
 //	_rCnt( bedR.ReadsCount(cID) )
 //{
 //	if( bedF ) {
-//		// fill _templRegns[IN_P] by Regions-features directly
-//		bedF->FillRegions(cID, _templRegns[IN_P]);
-//		// fill _templRegns[OUT_P] by Regions-feature, inverting and and overlaping with defRegns 
+//		// fill _regns[IN_P] by Regions-features directly
+//		bedF->FillRegions(cID, _regns[IN_P]);
+//		// fill _regns[OUT_P] by Regions-feature, inverting and and overlaping with defRegns 
 //		Regions tmpRegns;
-//		tmpRegns.FillInvert(_templRegns[IN_P], defRegns.LastEnd());
-//		_templRegns[OUT_P].FillOverlap(defRegns, tmpRegns);
+//		tmpRegns.FillInvert(_regns[IN_P], defRegns.LastEnd());
+//		_regns[OUT_P].FillOverlap(defRegns, tmpRegns);
 //	}
-//	else// fill _templRegns[IN_P] by defRegns
-//		_templRegns[OUT_P].Copy(defRegns);
+//	else// fill _regns[IN_P] by defRegns
+//		_regns[OUT_P].Copy(defRegns);
 //}
 //
 ///************************ end of class PairReadDistrib ************************/

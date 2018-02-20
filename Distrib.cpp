@@ -2,31 +2,20 @@
 
 /************************ class ReadDistrib ************************/
 
-// Prepares to scanning: reserves capacity and zero counters.
-//	@regns: Regions for wich distribution is defined
-//	@owner: owner (holder) of this distribution
-void ReadDistrib::Init(Regions* const regns, PairReadDistrib* const owner)
-{
-	_rtotalCnt = _ri = _wi = 0;
-	_regns = regns;
-	_owner = owner;
-	_wCurrLen = _owner->WinLength();
-	Reserve(regns->Length()/_wCurrLen); // + 1);
-}
-
 // Returns count of Reads in window
-//	@start: window's start position
+//	@wStart: current window's start position
+//	@wLen: current window's length
 //	@outWin: returned true if current Read passed left boundary of window, otherwise false
 //	return: number of Reads in window
-chrlen ReadDistrib::ScanWindow(chrlen start, bool* outWin)
+chrlen ReadDistrib::ScanWindow(chrlen wStart, chrlen wLen, bool* outWin)
 {
 	chrlen	rCentre, resCnt = 0, rCnt = _owner->ChromReadsCount();
 
 	*outWin = false;
 	for(; _ri<rCnt; _ri++) {		// loop through window for Reads
 		rCentre = _owner->ReadCentrePos(_ri);
-		if( rCentre >= start ) {				// pass left-of-window Reads
-			if( rCentre >= start + _wCurrLen ) {
+		if( rCentre >= wStart ) {				// pass left-of-window Reads
+			if( rCentre >= wStart + wLen ) {
 				*outWin = true;
 				return resCnt;					// exit on first right-of-window Read
 			}
@@ -38,18 +27,19 @@ chrlen ReadDistrib::ScanWindow(chrlen start, bool* outWin)
 }
 
 // Returns count of Reads in Region
-void ReadDistrib::ScanRegion(const Region& rgn)
+//	@rgn: current region
+//	@wLen: length of window
+void ReadDistrib::ScanRegion(const Region& rgn, chrlen wLen)
 {
 	chrlen start = rgn.Start;
 	chrlen end = rgn.End;
 	chrlen len = static_cast<chrlen>(Length());
 	bool outWin;
 	bool* poutWin = &outWin;
-	//chrlen res;
 
-	while(start + _wCurrLen <= end) {	// current window belong to region entirely
+	while(start + wLen <= end) {	// current window belong to region entirely
 		if( _wi+1 == len )	return;
-		_data[_wi] += ScanWindow(start, poutWin);
+		_data[_wi] += ScanWindow(start, wLen, poutWin);
 		_wi++;
 		//if( _wi == static_cast<chrlen>(Length()) )
 		//	Err("window's index is out of range", "ReadDistrib::ScanRegion").Throw();
@@ -58,20 +48,21 @@ void ReadDistrib::ScanRegion(const Region& rgn)
 			_rtotalCnt++;
 			_ri++;
 		}
-		start += _wCurrLen;
-		_wCurrLen = _owner->WinLength();	// set user's win length
+		start += wLen;
 	}
-	if(start + _wCurrLen > end) {	// current window exceeds region
-		_wCurrLen -= end - start;			// decrease current window by the rest of region
-		_data[_wi] += ScanWindow(start, poutWin);	// scan part of current window
-	}
+	if(start + wLen > end)		// current window exceeds region
+		_data[_wi] += ScanWindow(start, wLen - end + start, poutWin);	// scan part of current window
 }
 
-// Counts Reads in defined Regions through the chromosome
-void ReadDistrib::Scan()
+// Counts Reads in given Regions through the chromosome
+void ReadDistrib::Scan(const Regions& rgns)
 {
-	for(Regions::Iter it=_regns->Begin(); it!=_regns->End(); it++)
-		ScanRegion(*it);
+	chrlen wLen = _owner->WinLength();
+	_rtotalCnt = _ri = _wi = 0;
+
+	Reserve(rgns.Length()/wLen); // + 1);
+	for(Regions::Iter it=rgns.Begin(); it!=rgns.End(); it++)
+		ScanRegion(*it, wLen);
 }
 
 #ifdef DEBUG
@@ -101,34 +92,40 @@ void ReadDistrib::Print(ostream& stream) const
 
 /************************ class PairReadDistrib ************************/
 
-// Creates new instance by chrom, BedR, and regions
+// Initializes regions
 //	@cID: chromosome's ID
-//	@bedR: BedR for what distributions should be builded
-//	@templRegns: external additional template Regions from BedF or from whole chromosome.
+//	@cRegns: defined reference chrom Regions
 //	For In-peak distribution has been used directly,
 //	for Out-peak has been inverted and ovarlaped with chrom defined Regions.
-PairReadDistrib::PairReadDistrib(chrid cID, const BedR &bedR, const Regions &defRegns, const BedF *bedF) :
-	_halfRLen( bedR.ReadLen()/2 ),
-	_beginIt( bedR.ReadsBegin(cID) ),
-	_rCnt( bedR.ReadsCount(cID) )
+//	@bedF: optional additional regions
+void PairReadDistrib::InitRegions(chrid cID, const Regions &cRegns, const BedF *bedF)
 {
 	if( bedF ) {
-		// fill _templRegns[IN_P] by Regions-features directly
-		bedF->FillRegions(cID, _templRegns[IN_P]);
-		// fill _templRegns[OUT_P] by Regions-feature, inverting and and overlaping with defRegns 
+		// fill _regns[IN_P] by Regions-features directly
+		bedF->FillRegions(cID, _regns[IN_P]);
+		// fill _regns[OUT_P] by Regions-feature, inverting and and overlaping with defRegns 
 		Regions tmpRegns;
-		tmpRegns.FillInvert(_templRegns[IN_P], defRegns.LastEnd());
-		_templRegns[OUT_P].FillOverlap(defRegns, tmpRegns);
+		tmpRegns.FillInvert(_regns[IN_P], cRegns.LastEnd());
+		_regns[OUT_P].FillOverlap(cRegns, tmpRegns);
+		_rDistribs[IN_P].SetOwner(this);	// duplicates copy constructor; needed for _NO_UNODMAP build
 	}
-	else// fill _templRegns[IN_P] by defRegns
-		_templRegns[OUT_P].Copy(defRegns);
+	else// fill _regns[IN_P] by cRegns
+		_regns[OUT_P] = cRegns;
+	_rDistribs[OUT_P].SetOwner(this);		// duplicates copy constructor; needed for _NO_UNODMAP build
+
+}
+
+float PairReadDistrib::GetResults(eLocating loc, ULONG* rCnt, ULONG* wCnt) const
+{
+	rCnt[loc] += ReadsCount(loc);
+	wCnt[loc] += WinsCount(loc);
+	return DENS_BASE * Density(loc);;
 }
 
 /************************ end of class PairReadDistrib ************************/
 
 /************************ class GenomeReadDistrib ************************/
 
-#define DENS_BASE	1000	// base on wich density is defined
 const char* sRatio = "ratio";
 const string sDensUnit = "rd/kbs";
 
@@ -136,17 +133,20 @@ const string sDensUnit = "rd/kbs";
 // for each chromosome initializes default Regions and PairReadDistrib.
 // Only chromosomes marked as 'Treated' would be treated.
 //	@bedR: Reads wich are distribeted
-//	@gName: chrom.sizes file or genome directory, determining define Regions
+//	@gRegn: defined reference genome Regions
 //	@bedF: features determining peaks or NULL
 GenomeReadDistrib::GenomeReadDistrib (
-	const BedR & bedR, 
+	const BedR& bedR, 
 	GenomeRegions& gRegn,
 	const BedF* bedF) 
 	: _twoDistrs(bedF ? true : false)
 {
+	Reserve(bedR.ChromsCount());
 	for(BedR::cIter it = bedR.cBegin(); it != bedR.cEnd(); it++)
 		if(TREATED(it))
-			AddClass(CID(it), PairReadDistrib(CID(it), bedR, gRegn[CID(it)], bedF));
+			AddClass(CID(it), PairReadDistrib(CID(it), bedR)).
+				InitRegions(CID(it), gRegn[CID(it)], bedF);		// initialize Regions after adding to collection,
+																// to avoid regions copying
 }
 
 // Initializes and fills In-|Out-Read's distribution for each chromosome in genome
@@ -156,12 +156,9 @@ GenomeReadDistrib& GenomeReadDistrib::Scan(chrlen winLen)
 	_wLen = winLen;
 	// loop through chromosomes
 	for(Iter it = Begin(); it != End(); it++) {
-		if( _twoDistrs ) {
-			it->second.Init(PairReadDistrib::IN_P, winLen);
-			it->second.Scan(PairReadDistrib::IN_P);
-		}
-		it->second.Init(PairReadDistrib::OUT_P, winLen);
-		it->second.Scan(PairReadDistrib::OUT_P);
+		if( _twoDistrs )
+			it->second.Scan(PairReadDistrib::IN_P, winLen);
+		it->second.Scan(PairReadDistrib::OUT_P, winLen);
 	}
 	return *this;
 }
@@ -172,10 +169,10 @@ float	GenomeReadDistrib::Density (PairReadDistrib::eLocating loc) const
 {
 	if( loc == PairReadDistrib::IN_P && !_twoDistrs )
 		return -1;	// only out_peak distribution is defined
-		float res = 0;
-		for(cIter it = cBegin(); it != cEnd(); it++)
-			res += it->second.Density(loc);
-		return DENS_BASE * res;
+	float res = 0;
+	for(cIter it = cBegin(); it != cEnd(); it++)
+		res += it->second.Density(loc);
+	return DENS_BASE * res;
 }
 
 // Returns total number of Reads in n-|Out- distribution
@@ -209,38 +206,42 @@ ReadDistrib & GenomeReadDistrib::Distrib(PairReadDistrib::eLocating loc)
 
 void GenomeReadDistrib::PrintDensity()
 {
-	float	inDens = 0, outDens;
-	ULONG	rInCnt = 0, rOutCnt = 0,	// total count of reads in locations
-			wInCnt = 0, wOutCnt = 0;	// total count of windows in locations
+	chrid	cID;
+	float	inDens, outDens;
+	ULONG	rCnt[2], wCnt[2];	// total count of reads in locations, total count of windows in locations
+	memset(rCnt, 0, 2*sizeof(ULONG));
+	memset(wCnt, 0, 2*sizeof(ULONG));
 
 	// header
 	dout << "Mean density, " << sDensUnit << EOL;
 	if(_twoDistrs)	dout << "\tIn-peaks\tOut-peaks\t" << sRatio << EOL;
 
+#ifdef _NO_UNODMAP
 	for(cIter it=cBegin(); it!=cEnd(); it++) {
-		dout << Chrom::AbbrName(CID(it)) << TAB;
-		if(_twoDistrs) {
-			inDens = DENS_BASE * it->second.Density(PairReadDistrib::IN_P);
-			dout << inDens << TAB << TAB;
-			rInCnt += it->second.ReadsCount(PairReadDistrib::IN_P);
-			wInCnt += it->second.WinsCount(PairReadDistrib::IN_P);
-		}
-		outDens = DENS_BASE * it->second.Density(PairReadDistrib::OUT_P);
-		dout << outDens;
+		cID = CID(it);
+		const PairReadDistrib& prd = it->second;
+#else
+	// sort printed chroms
+	vector<chrid> cids;
+	cids.reserve(ChromsCount());
+	for(cIter it=cBegin(); it!=cEnd(); it++)	cids.push_back(CID(it));
+	sort(cids.begin(), cids.end());
 
-		rOutCnt += it->second.ReadsCount(PairReadDistrib::OUT_P);
-		wOutCnt += it->second.WinsCount(PairReadDistrib::OUT_P);
+	for(vector<chrid>::iterator it=cids.begin(); it!=cids.end(); it++) {
+		const PairReadDistrib& prd = At(cID = *it);
+#endif	// _NO_UNODMAP
+		dout << Chrom::AbbrName(cID) << TAB;
+		if(_twoDistrs)
+			dout << (inDens = prd.GetResults(PairReadDistrib::IN_P, rCnt, wCnt)) << TAB << TAB;
+		dout << (outDens = prd.GetResults(PairReadDistrib::OUT_P, rCnt, wCnt));
 		if(_twoDistrs)	dout << TAB << TAB << inDens/outDens;
 		dout << EOL;
+
 	}
 	if( ChromsCount() > 1 ) {
 		dout << Total << SepClTab;
-		if(_twoDistrs) {
-			inDens = DENS_BASE * float(rInCnt) / wInCnt / _wLen;
-			dout << inDens << TAB << TAB;
-		}
-		outDens = DENS_BASE * float(rOutCnt) / wOutCnt / _wLen;
-		dout << outDens;
+		if(_twoDistrs)	dout << (inDens = GetTotalDensity(0, rCnt, wCnt)) << TAB << TAB;
+		dout << (outDens = GetTotalDensity(1, rCnt, wCnt));
 		if(_twoDistrs)	dout << TAB << TAB << inDens/outDens;
 		dout << EOL;
 	}

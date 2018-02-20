@@ -5,12 +5,13 @@
 // Number of basics file's reading|writing buffer blocks.
 // Should be less than 2047 because of ULONG type of block size variable.
 // Otherwise the behaviour is unpredictable.
-#define NUMB_BLK 32
-#define BASE_BLK_SIZE (2 * 1024 * 1024)	// basic block 2 Mb
+//#define NUMB_BLK 32
+
+#define BASE_BLK_SIZE (1024 * 1024)	// basic block 1 Mb
 
 typedef short rowlen;	// type: length of row in TxtFile
 
-#define _buffLineOffset _readingLen
+#define _buffLineOffset _readedLen
 
 class TxtFile
 /*
@@ -35,18 +36,24 @@ public:
 		WRITE,	// creates file if it not exist and writes to it; file is cleared before
 		ALL		// creates file if it not exist and reads it
 	};
+	static int NUMB_BLK;	// size of basic block in Mb
 
 private:
 	enum eFlag {			// signs of file
-		CLONE		= 0x001,	// file is a clone
-		CONSTIT		= 0x002,	// file is a constituent of an aggregate file
-		ZIPPED		= 0x004,	// file is zipped
-		ABORTING	= 0x008,	// invalid file should be completed by throwing exception; for Reading mode
-		CRSET		= 0x010,	// CR symbol is present in the file; for Reading mode
-		CRCHECKED	= 0x020,	// the presence of a symbol CR is checked; for Reading mode
+		// The first two right bits are reserved for storing the length of the EOL marker: 1 or 2 
+		// The first bit is set to 1 in the constructor.
+		// If CR symbol is found at the end of line,
+		//	the second bit is raised to 1, the first turn down to 0
+		EOLSZ		= 0x003,	// mask for the 2 first bits
+		CRSET		= 0x002,	// CR symbol is present in the file; for Reading mode
+		CRCHECKED	= 0x004,	// the presence of a symbol CR is checked; for Reading mode
+		CLONE		= 0x008,	// file is a clone
+		ZIPPED		= 0x010,	// file is zipped
+		ABORTING	= 0x020,	// invalid file should be completed by throwing exception; for Reading mode
 		ENDREAD		= 0x040,	// last call of GetRecord() has returned NULL; for Reading mode
 		PRNAME		= 0x080,	// print file name in exception's message; for Reading mode
-		MTHREAD		= 0x100		// file in multithread mode: needs to be locked while writing
+		MTHREAD		= 0x100,		// file in multithread mode: needs to be locked while writing
+		//CONSTIT		= 0x200	// file is a constituent of an aggregate file
 	};
 	enum eBuff {		// signs of buffer; used in CreateBuffer() only
 		BUFF_BASIC,		// basic (block) read|write buffer
@@ -67,20 +74,27 @@ private:
 	BYTE	_cntRecLines;	// number of lines in a record
 	UINT	_recLen;		// for Reading mode only: the length of record with EOL marker
 	// === basic & line buffer common use
-	UINT	_readingLen;	// while file reading: number of actually readed chars in block
+	UINT	_readedLen;		// while file reading: number of actually readed chars in block
 							// while line writing: current shift from the _buffLine
 	// === line write buffer
 	char*	_buffLine;		// line write buffer; for writing mode only
 	rowlen	_buffLineLen;	// length of line write buffer in writing mode, otherwise 0
-	//rowlen	_buffLineOffset;// current shift from the _buffLine; replacement by #define!!!
+	//rowlen	_buffLineOffset;// current shift from the _buffLine; replaced by #define!!!
+
+	//Stopwatch	_stopwatch;
 protected:
 	char	_delim;
 
 private:
 	inline void RaiseFlag	(eFlag flag) const	{ _flag |= flag; }
 	inline void SetFlag	(eFlag flag, bool val)	{ val ? _flag |= flag : _flag &= ~flag; }
-	inline bool IsFlag(eFlag flag)	const	{ return (_flag & flag) != 0; }	// != 0 to avoid warning C4800
+	inline bool IsFlag(eFlag flag)		const	{ return (_flag & flag) != 0; }	// != 0 to avoid warning C4800
 	inline bool IsZipped()				const	{ return IsFlag(ZIPPED); }
+
+	// Establishes the presence of CR symbol at the end of line.
+	//	@isCR: if true then the second bit is raised to 1, the first turn down to 0,
+	//	so the value return by EOLSZ mask is 2, otherwise stayed 1
+	void SetCR(bool isCR)	{ if(isCR)	_flag ^= EOLSZ;	RaiseFlag(CRCHECKED); }
 
 	// Raises ENDREAD sign an return NULL
 	inline char* ReadingEnded()		  { RaiseFlag(ENDREAD); return NULL; }
@@ -136,7 +150,6 @@ protected:
 	// Used for multithreading file recording
 	//	@file: opened file which is cloned
 	//	@threadNumb: number of thread
-	//	Exception: file_error
 	TxtFile	(const TxtFile& file, threadnumb threadNumb);
 #endif
 	
@@ -145,7 +158,8 @@ protected:
 	// Gets the amount of characters corresponded to EOL
 	// In file created in Window EOL matches '\r\n', in file created in Linux EOL matches '\n',
 	//	return: in Windows always 1, in Linux: 2 for file created in Windows, 1 for file created in Linux
-	inline BYTE EOLSize() const	{ return (BYTE)IsFlag(CRSET) + 1; }
+	inline UINT EOLSize() const	{ return _flag & EOLSZ; }
+	//inline BYTE EOLSize() const	{ return (BYTE)IsFlag(CRSET) + 1; }
 
 	// Returns true if instance is a clone.
 	inline bool IsClone() const { return IsFlag(CLONE); }	// return _isClone;
@@ -436,7 +450,7 @@ struct Region
 	inline chrlen Length() const {	return End - Start + 1; }
 
 	// Initializes instance
-	void Init(chrlen start, chrlen end) { Start = start; End = end; }
+	inline void Init(chrlen start, chrlen end) { Start = start; End = end; }
 
 	inline bool operator==(const Region& r) const { return End == r.End && Start == r.Start; }
 
@@ -490,7 +504,7 @@ public:
 	inline Regions() {}
 	
 	// Copying constructor
-	inline Regions(const Regions& rgns) { _regions = rgns._regions;	}
+	//inline Regions(const Regions& rgns) { _regions = rgns._regions;	}
 	
 	// Single region constructor
 	inline Regions(chrlen start, chrlen end) { _regions.push_back(Region(start, end)); }
@@ -506,6 +520,12 @@ public:
 	
 	// Gets last end position.
 	inline chrlen LastEnd()		const { return _regions.back().End; }
+
+	inline Regions& operator=(const Regions& rgn)
+	{
+		_regions = rgn._regions;
+		return *this;
+	}
 
 	// Reserves container's capacity.
 	//	@count: reserved number of regions. The real number may be differ.
@@ -545,7 +565,7 @@ public:
 	void inline AddRegion(chrlen start, chrlen end)	{ _regions.push_back(Region(start, end)); }
 
 	// Copies external Regions to this instance
-	void inline Copy(const Regions &regions) { _regions = regions._regions; }
+	inline void Copy(const Regions &regns) { _regions = regns._regions;	}
 	
 protected:
 	// Reads data from file @fname
@@ -581,16 +601,11 @@ private:
 	char	*_currLine;		// current readed line; for reading only
 	short	*_fieldPos;		// array of start positions in _currLine for each field
 	USHORT	_lineSpecLen;	// length of line specifier; for reading only
-	bool	_checkFieldCnt;	// true if fields count should be checked; for reading only
 
 	// Checks if filed valid and throws exception if not.
 	//	@fInd: field index
 	//	return: true if field is valid
 	bool IsFieldValid	(BYTE fInd) const;
-
-	// Reads string by field's index from current line without control
-	//	@fInd: field index
-	inline const char* SField(BYTE fInd) const { return _currLine + _fieldPos[fInd]; }
 
 	// Initializes new instance.
 	//	@mode: action mode (read, write, all)
@@ -599,15 +614,14 @@ private:
 public:
 	// Creates new instance.
 	//	@fName: name of file
-	//	@minCntFields: obligatory number of fields separated by TAB
-	//	@maxCntFields: maximum number of fields separated by TAB
+	//	@minCntFields: obligatory number of fields separated by TAB; these fields are checked during initialization 
+	//	@maxCntFields: maximum number of fields separated by TAB; these fields are checked by a call
 	//	@mode: action mode (read, write, all)
 	//	@lineSpec: specific substring on which each data line is beginning;
 	//	other lines are interpreting as comments and would be skipped; for reading only
 	//	@comment: char indicates that line is comment; for reading only
 	//	@abortInvalid: true if invalid instance should be completed by throwing exception
 	//	@rintName: true if file name should be printed in exception's message
-	//	@checkFieldCnt: true if fields count should be checked; for reading only
 	TabFile(
 		const string& fName,
 		eAction mode=READ,
@@ -616,32 +630,22 @@ public:
 		char comment=HASH,
 		const char* lineSpec=NULL,
 		bool abortInvalid=true,
-		bool printName=true,
-		bool checkFieldCnt=true
-	) : _params(minCntFields, (maxCntFields==1 ? minCntFields : maxCntFields) + 1, comment, lineSpec),
-		_checkFieldCnt(checkFieldCnt),
+		bool printName=true
+	) : _params(minCntFields, maxCntFields, comment, lineSpec),
 		TxtFile(fName, mode, 1, abortInvalid, printName)
 	{	Init(mode); }
 
 	// Creates new instance for reading
 	//	@fName: name of file
-	//	@minCntFields: obligatory number of fields separated by TAB
-	//	@maxCntFields: maximum number of fields separated by TAB
-	//	@mode: action mode (read, write, all)
-	//	@lineSpec: specific substring on which each data line is beginning;
-	//	other lines are interpreting as comments and would be skipped; for reading only
-	//	@comment: char indicates that line is comment; for reading only
+	//	@params: TabFile params
 	//	@abortInvalid: true if invalid instance should be completed by throwing exception
 	//	@rintName: true if file name should be printed in exception's message
-	//	@checkFieldCnt: true if fields count should be checked; for reading only
 	TabFile(
 		const string& fName,
 		const TabFilePar& params,
 		bool abortInvalid=true,
-		bool printName=true,
-		bool checkFieldCnt=true
+		bool printName=true
 	) : _params(params),
-		_checkFieldCnt(checkFieldCnt),
 		TxtFile(fName, TxtFile::READ, 1, abortInvalid, printName)
 	{	Init(TxtFile::READ); }
 
@@ -655,7 +659,7 @@ public:
 		_params(file._params),
 		_fieldPos(file._fieldPos), 
 		_lineSpecLen(file._lineSpecLen),
-		_checkFieldCnt(file._checkFieldCnt),
+		//_checkFieldCnt(file._checkFieldCnt),
 		TxtFile(file, threadNumb) {}
 #endif
 
@@ -675,25 +679,36 @@ public:
 	//	return: current line.
 	const char* GetLine();
 
-	// Reads string by field's index from current line.
-	const char* StrField	(BYTE fInd)	const {
-		return IsFieldValid(fInd) ? SField(fInd) : NULL;
+	// Reads string by field's index from current line without check up.
+	const char* StrField	(BYTE fInd)	const {	return _currLine + _fieldPos[fInd]; }
+
+	// Reads string by field's index from current line with check up.
+	const char* StrFieldValid	(BYTE fInd)	const {
+		return IsFieldValid(fInd) ? StrField(fInd) : NULL;
 	}
-	// Gets pointer to the short chrom name in current line; for BED-file only
-	const char* ChromName()	const {
-		return IsFieldValid(0) ? (SField(0) + strlen(Chrom::Abbr)) : NULL;
+	// Gets pointer to the short chrom name in current line without check up; for BED-file only
+	const char* ChromName()	const {	return StrField(0) + strlen(Chrom::Abbr); }
+
+	// Reads checked integer by field's index from current line without check up.
+	inline int IntField	(BYTE fInd)	const {	return atoi(StrField(fInd)); }
+
+	// Reads checked integer by field's index from current line with check up.
+	int	 IntFieldValid	(BYTE fInd)	const {
+		return IsFieldValid(fInd) ? atoi(StrField(fInd)) : vUNDEF;
 	}
-	// Reads integer by field's index from current line.
-	int	 IntField	(BYTE fInd)	const {
-		return IsFieldValid(fInd) ? atoi(SField(fInd)) : vUNDEF;
+	// Reads float by field's index from current line without check up.
+	inline float FloatField	(BYTE fInd)	const {	return float(atof(StrField(fInd))); }
+
+	// Reads float by field's index from current line with check up.
+	float FloatFieldValid	(BYTE fInd)	const {
+		return IsFieldValid(fInd) ? float(atof(StrField(fInd))) : vUNDEF;
 	}
-	// Reads float by field's index from current line.
-	float FloatField	(BYTE fInd)	const {
-		return IsFieldValid(fInd) ? float(atof(SField(fInd))) : vUNDEF;
-	}
-	// Reads long by field's index from current line.
-	long LongField	(BYTE fInd)	const {
-		return IsFieldValid(fInd) ? long(atol(SField(fInd))) : vUNDEF;
+	// Reads long by field's index from current line without check up.
+	inline long LongField	(BYTE fInd)	const {	return long(atol(StrField(fInd))); }
+
+	// Reads long by field's index from current line with check up.
+	long LongFieldValid	(BYTE fInd)	const {
+		return IsFieldValid(fInd) ? long(atol(StrField(fInd))) : vUNDEF;
 	}
 };
 

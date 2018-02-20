@@ -4,6 +4,8 @@
 const char* modes[] = { "r", "w", "a+" };
 const char* bmodes[] = { "rb", "wb" };
 
+int TxtFile::NUMB_BLK = 4;	// size of basic block in Mb
+
 // Sets error code and throws exception if it is allowed.
 void TxtFile::SetError(Err::eCode errCode) const
 {
@@ -24,7 +26,7 @@ bool TxtFile::SetBasic(const string& fName, eAction mode, void* file)
 	_stream = NULL;
 	_errCode = Err::NONE;
 	_fName = fName;
-	_currRecPos = _recLen = _cntRecords = _readingLen = 0;
+	_currRecPos = _recLen = _cntRecords = _readedLen = 0;
 #ifdef _NO_ZLIB
 	if(IsZipped()) { SetError(Err::FZ_BUILD); return false; }
 #endif
@@ -66,7 +68,7 @@ bool TxtFile::CreateBuffer(eBuff buffType)
 //	@abortInvalid: true if invalid instance shold be completed by throwing exception
 //	@rintName: true if file name should be printed in exception's message
 TxtFile::TxtFile (const string& fName, eAction mode, BYTE cntRecLines, bool abortInvalid, bool printName) :
-	_flag(0),
+	_flag(1),
 	_cntRecLines(cntRecLines),
 	_buffLineLen(0)
 {
@@ -158,12 +160,10 @@ TxtFile::TxtFile(const TxtFile& file, threadnumb threadNumb) :
 
 TxtFile::~TxtFile()
 {
+	//_stopwatch.Stop(_fName);
 	if( _linesLen )						delete [] _linesLen;
-	if( _buff && !IsFlag(CONSTIT) )	delete [] _buff;
-	if( _buffLine )	{
-		//cout << "delete _buffLine\n";
-		delete [] _buffLine;
-	}
+	if( _buff /*&& !IsFlag(CONSTIT)*/)	delete [] _buff;
+	if( _buffLine )						delete [] _buffLine;
 	if( _stream && !IsClone() )	{
 		int res = 
 #ifndef _NO_ZLIB
@@ -181,6 +181,7 @@ TxtFile::~TxtFile()
 int TxtFile::ReadBlock(const UINT offset)
 {
 	size_t readLen;
+	//_stopwatch.Start();
 #ifndef _NO_ZLIB
 	if( IsZipped() ) {
 		int len = gzread((gzFile)_stream, _buff + offset, _buffLen - offset);
@@ -195,17 +196,26 @@ int TxtFile::ReadBlock(const UINT offset)
 		{ SetError(Err::F_READ); return -1; }
 	}
 	
-	_readingLen = readLen + offset;
+	_readedLen = readLen + offset;
 //#ifdef ZLIB_OLD
-	//if( _readTotal + _readingLen > _fSize )
-	//	_readingLen = _fSize - _readTotal;
-	//_readTotal += _readingLen;
+	//if( _readTotal + _readedLen > _fSize )
+	//	_readedLen = _fSize - _readTotal;
+	//_readTotal += _readedLen;
 //#endif
-	if( _readingLen != _buffLen && !IsZipped() && ferror((FILE*)_stream) )
+	if( _readedLen != _buffLen && !IsZipped() && ferror((FILE*)_stream) )
 	{ SetError(Err::F_READ); return -1; }
 	_currRecPos = 0;
-	return _readingLen == 0 ? 0 : 1;
+	//_stopwatch.Stop();
+	return _readedLen == 0 ? 0 : 1;
 }
+
+//bool CheckChar(char c, chrlen* counter, short* const posTab, BYTE cntTabs, chrlen pos)
+//{
+//	if( c==TAB && *counter < cntTabs )
+//		//posTab[++(*counter)] = i - currLinePos + 1;
+//		posTab[++(*counter)] = 1;
+//	return true;
+//}
 
 // Sets _currLinePos to the beginning of next non-empty line in _buff
 //	@counterN: if not NULL, adds to counterN the number of 'N' in a record. Used in Fa() only.
@@ -225,11 +235,11 @@ char* TxtFile::GetRecord(chrlen* const counterN, short* const posTab, BYTE cntTa
 	_recLen = 0;
 	for(BYTE r=0; r<_cntRecLines; r++)
 		for(i=currLinePos;; i++)	{
-			if( i >= _readingLen ) {			// check for the next block
-				if( _readingLen != _buffLen )	// final block
+			if( i >= _readedLen ) {			// check for the next block
+				if( _readedLen != _buffLen )	// final block
 					if( i == _buffLen			// current line is not ended by EOL
 					|| _buff[i-1] == EOL		// current line which is ended by EOL
-					|| _buff[i-1] == '\0'	)	// EOL in the current line has been replaced by 0 in previous call TabFile::GetLine()
+					|| _buff[i-1] == '\0')		// EOL has been replaced by previous call TabFile::GetLine()
 						return ReadingEnded();	// normal completion
 					else {						// current line is not ended by EOL
 						if(i<_buffLen)
@@ -242,30 +252,30 @@ char* TxtFile::GetRecord(chrlen* const counterN, short* const posTab, BYTE cntTa
 					return ReadingEnded();
 				}
 				// length of untreated rest of record
-				UINT restLen = _readingLen - _currRecPos - cntEmpty;
-				// move untreated rest to the beginning of buffer; if restLen=0, skip moving
+				UINT restLen = _readedLen - _currRecPos - cntEmpty;
+				// move untreated remainder to the beginning of buffer; if restLen=0, skip moving
 				memmove(_buff, _buff + _currRecPos, restLen);
 				if( !ReadBlock(restLen) )
 					return ReadingEnded();	// record was finished exactly by previous ReadBlock()
+				// restart at the beginning of the record
 				indTab = 1;
 				cntN = currLinePos = cntEmpty = i = _recLen = r = 0;
 			}
 			c = _buff[i];
-			if( counterN && c==cN )
+			if( c==cN )
 				cntN++;
-			else if( indTab < cntTabs && c==TAB )
-				posTab[indTab++] = i - currLinePos + 1;
+			else if( c==TAB ) {
+				if(indTab < cntTabs)
+					posTab[indTab++] = i - currLinePos + 1;
+			}
 			else if( c==EOL ) {
 				if( i==currLinePos ) {			// EOL marker is first in line
 					currLinePos++; cntEmpty++;	// skip empty line
 					continue;
 				}
-				if( !IsFlag(CRCHECKED) ) {
-					SetFlag(CRSET, _buff[i-1]==CR);
-					RaiseFlag(CRCHECKED);
-				}
+				if( !IsFlag(CRCHECKED) )	SetCR(_buff[i-1]==CR);	// define EOL size
 A:				_recLen += (_linesLen[r] = UINT(i-currLinePos) + 1);
-				currLinePos = i+1;
+				currLinePos = i + 1;
 				break;
 			}
 		}
@@ -389,6 +399,7 @@ void TxtFile::AddRecord(const char *src, UINT len, bool closeLine)
 // Writes thread-safely current block to file.
 void TxtFile::Write() const
 {
+	//_stopwatch.Start();
 #ifdef _MULTITHREAD
 	if(IsFlag(MTHREAD))	Mutex::Lock(Mutex::WR_FILE);
 #endif
@@ -404,13 +415,14 @@ void TxtFile::Write() const
 #endif
 	if(res != _currRecPos)	SetError(Err::F_WRITE);
 	else					_currRecPos = 0;
+	//_stopwatch.Stop();
 }
 
 //bool	TxtFile::AddFile(const string fName)
 //{
 //	TxtFile file(fName, *this);
 //	while( file.ReadBlock(0) ) {
-//		_currRecPos = file._readingLen;
+//		_currRecPos = file._readedLen;
 //		if( !Write() )	return false;
 //	}
 //	return true;
@@ -607,7 +619,7 @@ void Regions::Print () const
 bool TabFile::IsFieldValid	(BYTE ind) const
 {
 	if(_fieldPos[ind] == vUNDEF		// vUNDEF was set in buff if there was no such field in the line
-	|| !SField(ind)[0]) {			// empty string was set if the line was ended by TAB (empty field)
+	|| !StrField(ind)[0]) {			// empty string was set if the line ended by TAB (empty field)
 		if(ind < _params.MinFieldCnt)
 			ThrowLineExcept(Err::TF_FIELD);
 		return false;
@@ -646,7 +658,6 @@ const char* TabFile::GetFirstLine(ULONG *cntLines)
 
 const char*	TabFile::GetLine()
 {
-	USHORT	currPos;	// a bit faster than using _currPos in heep
 	char*	currLine;	// a bit faster than using _currLine in heep
 
 	// fill _fieldPos 0 to check if all fields will be initialize
@@ -654,43 +665,41 @@ const char*	TabFile::GetLine()
 	// First field's position usually is 0, but in case of blanks at the beginning of line
 	// it will be in first unblank position.
 	// So GetRecord(..) fiils _fieldPos beginning from second field.
-	memset(_fieldPos, vUNDEF, sizeof(short)*_params.MaxFieldCnt);
+	memset(_fieldPos, vUNDEF, sizeof(short) * _params.MaxFieldCnt);
 
 	currLine = GetRecord(NULL, _fieldPos, _params.MaxFieldCnt);
 	if( currLine != NULL ) {
-		// skip blanks on the beginning of line
-		for(currPos=0; *(currLine+currPos)==BLANK; currPos++);
+		USHORT	currPos = 0;	// a bit faster than using _currPos in heep
+	
+		// skip blanks at the beginning of line
+		while( *(currLine+currPos)==BLANK )	currPos++;
 		// skip comment line
 		if( *(currLine+currPos) == _params.Comment )
 			return GetLine();
 		// check line for specifier
-		if(_params.LineSpec && memcmp(currLine+currPos, _params.LineSpec, _lineSpecLen) ) {
-			//SetError(Err::TF_SPEC);
-			//return _currLine = NULL;
+		if(_params.LineSpec && memcmp(currLine+currPos, _params.LineSpec, _lineSpecLen) )
 			return GetLine();
-		}
 
-		// check readed field's positions, excluding first & last one
-		if( _checkFieldCnt )
-			for(BYTE i=1; i<_params.MaxFieldCnt-1; i++)
-				if( _fieldPos[i] == vUNDEF ) {
-					SetError(Err::TF_FIELD);
-					return _currLine = NULL;
-				}
-
+		BYTE i = 1;
 		_fieldPos[0] = currPos;		// set start position of first field
-		// replace TABs by 0
-		for(BYTE i=1; i<_params.MaxFieldCnt; i++) {
-			//if( (currPos=_fieldPos[i]) == vUNDEF ) {	// last position may be 0 if numbers of TABs in line is less than number of fields
+		// check obligatory field's positions, excluding first & last one
+		for(; i<_params.MinFieldCnt-1; i++)
 			if( _fieldPos[i] == vUNDEF ) {
-				currLine[RecordLength() -1] = '\0';		// close record by 0: it is necessery for last position
+				SetError(Err::TF_FIELD);
+				return _currLine = NULL;
+			}
+			else
+				currLine[_fieldPos[i]-1] = '\0';	// replace TABs by 0
+
+		for(; i<_params.MaxFieldCnt; i++) {
+			if( _fieldPos[i] == vUNDEF ) {			// if numbers of TABs is less than number of fields
+				currLine[RecordLength()-1] = '\0';	// close record by 0: it is necessery for the last position
 				break;
 			}
-			//currPos=_fieldPos[i];
-			//currLine[currPos-1] = '\0';
-			currLine[_fieldPos[i]-1] = '\0';
+			currLine[_fieldPos[i]-1] = '\0';		// replace TABs by 0
 		}
-		// this variant when _fieldPos is not initialized in GetRecord(): a bit more slower
+
+		// this version when _fieldPos is not initialized in GetRecord(): a bit more slower
 		//for(BYTE i=1; i<_cntFields; i++) {
 		//	// search for the next TAB
 		//	for(; currPos<_recLen; currPos++)

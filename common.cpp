@@ -920,24 +920,78 @@ const string FT::RealExt(eTypes t, bool isZip)
 
 /************************ end of class FileFormat ************************/
 
-/************************  class Timer ************************/
-bool	Timer::Enabled = false;
-clock_t	Timer::_StartCPUClock;
+// Prints elapsed time interval accurate to minutes
+//	@elapsed: elapsed time interval
+//	return: number of elapsed minutes within last hour (the rest in minutes)
+int PrintElapsedMins(long elapsed)
+{
+	int hours = elapsed/60;
+	int mins = hours%60;
+	hours /= 60;
+	dout << setfill('0') << setw(2);
+	if(hours)	dout << hours << COLON << setw(2);
+	dout<< mins << COLON;	// mins
+	return mins;
+}
+
+/************************  class TimerBasic ************************/
+bool	TimerBasic::Enabled = false;
+
+// Stops enabled timer and print elapsed time with title
+long TimerBasic::GetElapsed() const
+{
+	time_t stopTime;
+	time( &stopTime );
+	return (long)difftime(stopTime, _startTime);
+}
 
 // Prints elapsed time interval
-//	@title: string printed before time output
 //	@elapsed: elapsed time interval
+//	@title: string printed before time output
 //	@parentheses: if true then output time in parentheses
 //	@isCarrgReturn: if true then ended output by EOL
-void Timer::PrintElapsed(const char *title, long elapsed, bool parentheses, bool isCarrgReturn)
+void TimerBasic::PrintElapsed(long elapsed, const char *title, bool parentheses, bool isCarrgReturn)
 {
 	if( title )			dout << title;
 	if( parentheses )	dout << '(';
-	long hours = elapsed/60/60;
-	if( hours )
-		dout << setfill('0') << setw(2) << hours << COLON;
-	dout<< setfill('0') << setw(2) << (elapsed/60%60) << COLON
-	    << setfill('0') << setw(2) << (elapsed%60);
+	PrintElapsedMins(elapsed);
+	dout << setw(2) << (elapsed%60);		// secs
+	if( parentheses )	dout << ')';
+	if( isCarrgReturn ) {
+		dout << EOL;
+		fflush(stdout);
+	}
+}
+/************************  end ofclass TimerBasic ************************/
+
+/************************  class Timer ************************/
+clock_t	Timer::_StartCPUClock;
+/************************  end of class Timer ************************/
+
+/************************  class Stopwatch ************************/
+
+/************************  end of class Stopwatch ************************/
+// Stops Stopwatch
+//	@title: if not empty, and if instance was launched, output sum wall time with title
+//	'const' to apply to constant objects
+void Stopwatch::Stop(const string title) const
+{
+	if(!_isStarted)		return;
+	_sumTime += GetElapsed();
+	if(title!=strEmpty)	PrintElapsed(_sumTime, (title + sBLANK).c_str(), false, true);
+}
+
+/************************  class StopwatchCPU ************************/
+
+void StopwatchCPU::PrintElapsed(bool parentheses, bool isCarrgReturn)
+{
+	dout << TAB;
+	if( parentheses )	dout << '(';
+	long elaps = _sumclock/CLOCKS_PER_SEC;
+	int mins = PrintElapsedMins(elaps);
+	float secs = float(_sumclock)/CLOCKS_PER_SEC- mins*60;
+	if(secs < 10)	dout << '0';
+	dout << fixed << setprecision(2) << secs;			// secs
 	if( parentheses )	dout << ')';
 	if( isCarrgReturn ) {
 		dout << EOL;
@@ -945,38 +999,14 @@ void Timer::PrintElapsed(const char *title, long elapsed, bool parentheses, bool
 	}
 }
 
-// Stops enabled CPU timer and print elapsed time
-//	@isCarrgReturn: if true then ended output by EOL
-void Timer::StopCPU(bool isCarrgReturn)
+void StopwatchCPU::Stop(bool print)
 {
-	if( Enabled )
-		PrintElapsed("CPU: ", (clock()-_StartCPUClock)/CLOCKS_PER_SEC, false, isCarrgReturn);
+	_sumclock += clock() - _clock;
+	if(print)	PrintElapsed(false, false);
 }
 
-// Stops enabled timer and print elapsed time with title
-//	@title: string printed before time output
-//	@parentheses: if true then output time in parentheses
-//	@isCarrgReturn: if true then ended output by EOL
-void Timer::Stop(const char *title, bool parentheses, bool isCarrgReturn)
-{
-	if( _enabled ) {
-		time_t stopTime;
-		time( &stopTime );
-		PrintElapsed(title, (long)difftime(stopTime, _startTime), parentheses, isCarrgReturn);
-	}
-}
-/************************  end of class Timer ************************/
+/************************  end of class StopwatchCPU ************************/
 
-/************************  class CPU_Timer ************************/
-//bool CPU_Timer::Enabled = false;
-//clock_t CPU_Timer::_startTime;
-//
-//void CPU_Timer::Stop(const char *title, bool isCarrgReturn)
-//{
-//	if( Enabled )
-//		Timer::PrintElapsed(title, (clock()-_startTime)/CLOCKS_PER_SEC, false, isCarrgReturn);
-//}
-/************************  end of class CPU_Timer ************************/
 
 #ifdef _MULTITHREAD
 /************************  class Mutex ************************/

@@ -123,28 +123,32 @@ Obj::Ambig::Ambig (eInfo info, bool alarm, FT::eTypes format,
 #ifndef _ISCHIP
 	_treatcID(vUNDEF),
 #endif
-	unsortedItems(false)
+	unsortedItems(false),
+	chrLen(0)
 {
 	memset(_cases, 0, _CasesCnt*sizeof(Case));	// initialize by 0
-	_cases[DUPL].Type = dupl;
-	_cases[CROSS].Type = _cases[ADJAC].Type = crossANDadjac;
-	_cases[COVER].Type = _cases[SHORT].Type = _cases[SCORE].Type = OMIT;
-	_cases[DIFFSZ].Type = diffsz;
-	_cases[EXCEED].Type = OMIT;
+	_cases[DUPL].Action = dupl;
+	_cases[CROSS].Action = _cases[ADJAC].Action = crossANDadjac;
+	_cases[COVER].Action = _cases[SHORT].Action = _cases[SCORE].Action = OMIT;
+	_cases[DIFFSZ].Action = diffsz;
+	_cases[EXCEED].Action = OMIT;
 }
 
 // Initializes given Region by second and third current reading line positions, with validating
 //	@rgn: Region that should be initialized
-//	@cLen: chrom lemgth
+//	@prevStart: previous start position
 //	return: true if Region was initialized successfully
-bool Obj::Ambig::InitRegn(Region& rgn, chrlen cLen)
+bool Obj::Ambig::InitRegn(Region& rgn, chrlen prevStart)
 {
 	long start = _file->LongField(1);
 	long end = _file->LongField(2);
-	if(start < 0 || end < 0)	ThrowExcept(Err::BP_NEGPOS);
-	if(start >= end)			ThrowExcept(Err::BP_BADEND);
-	if(cLen > 0 && chrlen(end) > cLen && TreatCase(EXCEED) < 0)	return false;
+	if(start < 0)		ThrowExcept(Err::BP_NEGPOS);
+	if(start >= end)	ThrowExcept(Err::BP_BADEND);
+	if(chrLen && chrlen(end)>chrLen && TreatCase(EXCEED)<0)	return false;	// exceeding chrom
+	
 	rgn.Init(start, end);
+	if(start < prevStart)			// unsorted feature?
+		unsortedItems = true;
 	return true;
 }
 
@@ -191,7 +195,7 @@ bool Obj::Ambig::Print(chrid cID, const char* title, ULONG totalItemCnt, ULONG a
 			_cases[NEGL].Count = totalItemCnt - acceptItemCnt - Count();
 			// correct (add) accepted features
 			for(BYTE i=0; i<_CasesCnt-1; i++)	// loop excepting NEGL chroms case
-				if( _cases[i].Type == Ambig::ACCEPT )	_cases[NEGL].Count += _cases[i].Count;
+				if( _cases[i].Action == Ambig::ACCEPT )	_cases[NEGL].Count += _cases[i].Count;
 			
 			PrintCaseStat(NEGL, totalItemCnt);
 		}
@@ -203,15 +207,6 @@ bool Obj::Ambig::Print(chrid cID, const char* title, ULONG totalItemCnt, ULONG a
 	}
 	fflush(stdout);
 	return res;
-}
-
-// Adds statistics and print given ambiguity as alarm (if permitted)
-//	@ambig: given ambiguity
-//	return: treatment code: 1 - accept, 0 - handle, -1 - omit
-int Obj::Ambig::TreatCase(eCase ambig)
-{
-	_cases[ambig].Count++;
-	return (this->*_Actions[_cases[ambig].Type])(ambig);
 }
 
 #ifndef _ISCHIP
@@ -272,7 +267,7 @@ void Obj::Init	(const char* title, const string& fName, Ambig& ambig, void* addO
 		_EOLneeded = true;
 	}
 	try {
-		TabFile file(fName, FT::FileParams(ambig.FileType()), abortInvalid, !isInfo, false);
+		TabFile file(fName, FT::FileParams(ambig.FileType()), abortInvalid, !isInfo);	//, false);
 		ambig.SetFile(file);
 		items = InitChild(ambig, addObj);
 	}
@@ -306,10 +301,21 @@ void Obj::PrintEOL(bool printEOL)
 	_EOLneeded = false;
 }
 
-
 /******************** end of class Obj *********************/
 
 /************************ class Bed ************************/
+
+// Checks if chromosome is uniq and adds it to the container
+//	@cID: chroms id
+//	@firstInd: first item index
+//	@lastInd: last item index
+//	@file: file to output message
+void Bed::AddChrom(chrid cID, chrlen firstInd, chrlen lastInd, const TabFile& file)
+{
+	if( FindChrom(cID) )
+		file.ThrowExcept(ItemTitle(true) + " are not consolidated on chromosomes");
+	AddVal(cID, ChromItemsInd(firstInd, lastInd));
+}
 
 // Initializes instance from tab file
 //	@ambig: ambiguities
@@ -325,14 +331,13 @@ dchrlen Bed::InitChild	(Ambig& ambig, void* pcSizes)
 		
 	chrlen 	firstInd = 0,	// first index in feature's container for current chromosome
 			cntLines = 0,	// count of lines beginning with 'chr'
-			currInd	= 0;	// current index in Feature's/Read's container.
+			currInd	= 0,	// current index in Feature's/Read's container.
 							// Needed to avoid excess virtual method given current container size
+			prevStart = 0;	// start previous feature positions
 	Region	rgn;			// current feature positions
-	chrlen	prevStart=0,	// start previous feature positions
-			cLen = 0;		// the length of chromosome
 	chrid	cCurrID,		// current chromosome's ID
 			cNextID;		// next chromosome's ID
-	bool	needSortChrom = false;
+	bool	unsortedChroms = false;
 	bool	cAll = Chrom::StatedAll();				// true if all chroms are stated by user
 	char	cName[Chrom::MaxShortNameLength + 1];	// chrom number (only) buffer
 
@@ -340,7 +345,6 @@ dchrlen Bed::InitChild	(Ambig& ambig, void* pcSizes)
 	ReserveItemContainer(initSize);
 	cName[0] = 0;	// empty initial chrom name
 	cCurrID = Chrom::ID(file.ChromName());		// first chrom ID
-	if(cSizes)	cLen = cSizes->Size(cCurrID);
 
 	do {
 		if( strcmp(cName, file.ChromName()) ) {	// next chromosome?
@@ -354,16 +358,15 @@ dchrlen Bed::InitChild	(Ambig& ambig, void* pcSizes)
 			strcpy(cName, file.ChromName());
 			if( cAll ) {			// are all chroms specified?
 				if( currInd != firstInd	)		// have been features for this chrom saved?
-					// save current chrom which features have been saved already
-					AddVal(cCurrID, ChromItemsInd(firstInd, currInd));
+					AddChrom(cCurrID, firstInd, currInd, file);	// chrom's features have already been saved
 				if( cNextID < cCurrID && cNextID != Chrom::M )	// unsorted chrom?
-					needSortChrom = true;
+					unsortedChroms = true;
 			}
 			else {		// single chromosome is specified
-				// features in a single defined chrom were saved;
+				// features in a single defined chrom have already been saved;
 				// the chrom proper will be saved after loop
 				if(rgn.End)			break;
-				if(needSortChrom)
+				if(unsortedChroms)
 					file.ThrowExcept(
 						"is unsorted. Option --chr " + Chrom::Name(Chrom::StatedID()) + " is forbidden");
 				if(cNextID != Chrom::StatedID())	continue;
@@ -373,9 +376,9 @@ dchrlen Bed::InitChild	(Ambig& ambig, void* pcSizes)
 			ambig.SetTreatedChrom(cCurrID);
 #endif
 			firstInd = currInd;
+			if(cSizes)	ambig.chrLen = cSizes->Size(cCurrID);
 			cntLines++;
-			if(cSizes)	cLen = cSizes->Size(cCurrID);
-			if( !ambig.InitRegn(rgn, cLen) )
+			if( !ambig.InitRegn(rgn, 0) )
 				continue;
 		}
 		else { 
@@ -383,10 +386,8 @@ dchrlen Bed::InitChild	(Ambig& ambig, void* pcSizes)
 			|| (!cAll && cCurrID != Chrom::StatedID()) )	// undefined chrom?
 				continue;
 			cntLines++;
-			if( !ambig.InitRegn(rgn, cLen) )
+			if( !ambig.InitRegn(rgn, prevStart) )
 				continue;
-			if( rgn.Start < prevStart )			// unsorted feature?
-				ambig.unsortedItems = true;
 			if( !CheckLastPos(rgn, ambig) )		// check positions for the same chromosome only
 				continue;
 		}
@@ -396,15 +397,13 @@ dchrlen Bed::InitChild	(Ambig& ambig, void* pcSizes)
 	}
 	while( file.GetLine() );
 
-	if( rgn.End && currInd ) {		// some features for at least one valid chrom were saved
+	if( rgn.End && currInd ) {			// some features for at least one valid chrom were saved
 		if( cCurrID != Chrom::UnID )	// is last chrom valid?
-			// save last chrom. Its features are saved already.
-			AddVal(cCurrID, ChromItemsInd(firstInd, currInd));
-
+			AddChrom(cCurrID, firstInd, currInd, file);	// Last chrom's features have already been saved
 		if( initSize/currInd > 2 )	ShrinkItemContainer();
-		if( needSortChrom )					Sort();
+		if( unsortedChroms )		Sort();
 		if( ambig.unsortedItems ) {
-			file.ThrowExcept("unsorted " + ItemTitle(true) + ". Sorting may take ime.", false);
+			file.ThrowExcept("unsorted " + ItemTitle(true) + ". Sorting may take time.", false);
 			SortItems(ambig);
 		}
 	}
@@ -477,13 +476,13 @@ void Bed::Print(chrlen itemCnt) const
 //  return: true if item should be accepted; otherwise false
 bool BedR::CheckItemPos(ItemsIter it, const Region& rgn, Ambig& ambig)
 {
-	if( !_readLen )		_readLen = rgn.Length() - 1;	// initialize Read length once
-	else if( _readLen != rgn.Length() - 1				// different Read length?
-	&& ambig.TreatCase(ambig.DIFFSZ) < 0)	return false;
+	if(_readLen != rgn.Length()/*- 1*/)					// different Read length?
+		if(!_readLen)	_readLen = rgn.Length()/*- 1*/;	// initialize Read length once
+		else if(ambig.TreatCase(ambig.DIFFSZ) < 0)	return false;
 
 	if( rgn.Start == it->Pos							// duplicated Read?
 	&& ambig.TreatCase(ambig.DUPL) < 0 )	return false;
-	// adjacent & crossed Reads are not checked: it's a normal cases
+	// adjacent & crossed Reads are not checked: there are common cases
 	// covered Reads are not checked: it's impossible case
 	return true;
 }
@@ -496,11 +495,14 @@ const string NotStated = " is not stated";
 //	return: true if Read was added successfully
 bool BedR::AddPos(const Region& rgn, TabFile& file)
 {
-	float score = file.FloatField(4);
-	if( score <= _minScore )	return false;				// pass Read with under-threshhold score
+#ifdef _BEDR_EXT
+	readscr score = file.FloatFieldValid(4);
+	if(score <= _minScore)	return false;				// pass Read with under-threshhold score
+	if(score > _maxScore)	_maxScore = score;
+#endif
 #ifdef _VALIGN
-	const char* rName = file.StrField(3);
-	const char strand = *file.StrField(5);
+	const char* rName = file.StrFieldValid(3);
+	const char strand = *file.StrFieldValid(5);
 	if( _rNameType == Read::nmUndef ) {	// first Read: define type of Read's name
 		const char* sNumVal = strchr(rName, *Read::NmNumbDelimiter);
 		if( sNumVal ) {
@@ -520,11 +522,10 @@ bool BedR::AddPos(const Region& rgn, TabFile& file)
 		if( posDelim )		rName = posDelim + 1;
 		else	Err(Err::BR_RNAME, NULL, "paired-end delimiter '-'" + NotStated).Throw();
 	}
-	_items.push_back(Read(rgn.Start, cID, size_t(atol(rName)), readscr(score)));
+	_items.push_back(Read(rgn.Start, cID, size_t(atol(rName)), score));
 #else
 	_items.push_back(Read(rgn.Start));
 #endif	// _VALIGN
-	if(score > _maxScore)	_maxScore = score;
 	return true;
 }
 
@@ -582,7 +583,7 @@ bool BedF::CheckItemPos(ItemsIter it, const Region& rgn, Ambig& ambig)
 		if(_fLen)	_unifLen = abs(_fLen-long(rgn.Length())) <= 10;	// consider the difference 10 as a threshold
 		else		_fLen = rgn.Length();	// initialize feature's length once
 #endif
-	Region currRgn = *it;
+	Region& currRgn = *it;
 	if(rgn == currRgn)					// duplicated feature?
 		return ambig.TreatCase(ambig.DUPL) >= 0;
 #ifdef _ISCHIP
@@ -605,7 +606,7 @@ bool BedF::CheckItemPos(ItemsIter it, const Region& rgn, Ambig& ambig)
 bool BedF::AddPos(const Region& rgn, TabFile& file)
 {
 #ifdef _ISCHIP
-	readscr score = file.FloatField(4);
+	readscr score = file.FloatFieldValid(4);
 	_items.push_back(Featr(rgn, score));
 	if(score > _maxScore)	_maxScore = score;
 #else

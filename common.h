@@ -775,13 +775,17 @@ public:
 
 // 'TabFilePar' keeps basic parameters for TabFile
 struct TabFilePar {
-	const BYTE	MinFieldCnt;	// minimum number of feilds in file line
-	const BYTE	MaxFieldCnt;	// maximum used number of feilds in data line
+	const BYTE	MinFieldCnt;	// minimum number of feilds in file line; these fields are checked during initialization
+	const BYTE	MaxFieldCnt;	// maximum possible number of feilds in data line; these fields are checked by a call
 	const char Comment;			// char indicates that line is comment
 	const char* LineSpec;		// substring on which each data line is beginning
 
-	inline TabFilePar(BYTE	minTabCnt, BYTE maxTabCnt, char comm, const char* lSpec)
-		: MinFieldCnt(minTabCnt), MaxFieldCnt(maxTabCnt), Comment(comm), LineSpec(lSpec) {}
+	inline TabFilePar(BYTE	minTabCnt, BYTE maxTabCnt, char comm, const char* lSpec) :
+		MinFieldCnt(minTabCnt),
+		MaxFieldCnt(maxTabCnt<minTabCnt ? minTabCnt : maxTabCnt),
+		Comment(comm),
+		LineSpec(lSpec)
+		{}
 };
 
 // 'File Type' implements bioinformatics file type routines 
@@ -850,52 +854,111 @@ public:
 
 } fformat;
 
-class Timer
-{
-private:
-	time_t	_startTime;
-	bool	_enabled;	// True if local timing is enabled
-	static clock_t	_StartCPUClock;
 
-	// Prints elapsed time interval
-	//	@title: string printed before time output
+// Basic class for wall time measurement
+class TimerBasic
+{
+protected:
+	// Prints elapsed wall time interval
 	//	@elapsed: elapsed time interval
+	//	@title: string printed before time output
 	//	@parentheses: if true then output time in parentheses
 	//	@isCarrgReturn: if true then ended output by EOL
-	static void PrintElapsed(const char *title, long elapsed, bool parentheses, bool isCarriageReturn);
+	static void PrintElapsed(long elapsed, const char *title, bool parentheses, bool isCarriageReturn);
 
+	mutable time_t	_startTime;
+	mutable bool	_enabled;	// True if local timing is enabled
+
+	// Creates a new TimerBasic
+	//	@enabled: if true then set according total timing enabling
+	TimerBasic(bool enabled = true)	{ _enabled = enabled ? Enabled : false;	}
+	
+	// Stops timer and return elapsed wall time
+	long GetElapsed() const;
+	
 public:
 	// True if total timing is enabled
 	static bool		Enabled;
 
+	// True if instance timing is enabled
+	inline bool IsEnabled() const { return _enabled; }
+
+	// Starts timer
+	inline void Start()		{ if(_enabled) time( &_startTime ); }
+};
+
+// 'Timer' measures the single wall time interval
+class Timer : public TimerBasic
+{
+private:
+	static clock_t	_StartCPUClock;
+
+public:
 	// Starts enabled CPU timer, if it is enabled
 	static inline void StartCPU()	{ if( Enabled ) _StartCPUClock = clock(); }
 	
 	// Stops enabled CPU timer and print elapsed time
 	//	@isCarrgReturn: if true then ended output by EOL
-	static void StopCPU(bool isCarrgReturn=true);
+	static void StopCPU(bool isCarrgReturn=true) {
+		if(Enabled)	PrintElapsed((clock()-_StartCPUClock)/CLOCKS_PER_SEC, "CPU: ", false, isCarrgReturn);
+	}
 
 	// Creates a new Timer and starts it if timing is enabled
 	//	@enabled: if true then set according total timing enabling
-	Timer(bool enabled = true)	{ _enabled = enabled ? Enabled : false; Start(); }
+	inline Timer(bool enabled = true) : TimerBasic(enabled) { Start(); }
 	
-	// Restarts timer, if timing is enabled
-	inline void Start()				{ if( _enabled ) time( &_startTime ); }
-
-	// Stops enabled timer and print elapsed time with title
+	// Stops enabled timer and prints elapsed time with title
 	//	@title: string printed before time output
 	//	@parentheses: if true then output time in parentheses
 	//	@isCarrgReturn: if true then ended output by EOL
-	void Stop(const char *title, bool parentheses, bool isCarrgReturn);
-	
-	// Stops enabled timer and print elapsed time
+	void Stop(const char *title, bool parentheses, bool isCarrgReturn) {
+		if(_enabled)	PrintElapsed(GetElapsed(), title, parentheses, isCarrgReturn);
+	}
+
+	// Stops enabled timer and prints elapsed time
 	//	@parentheses: if true then output time in parentheses
 	//	@isCarrgReturn: if true then ended output by EOL
 	inline void Stop(bool parentheses = false, bool isCarrgReturn = true)	{
 		Stop(NULL, parentheses, isCarrgReturn); }
+};
 
-	// True if instance timing is enabled
-	inline bool IsEnabled() const { return _enabled; }
+// 'Stopwatch' measures the sum of wall time intervals
+class Stopwatch : public TimerBasic
+{
+	private:
+		mutable long	_sumTime;
+		mutable bool	_isStarted;		// true if Start() was called even ones
+
+	public:
+		inline Stopwatch() : _sumTime(0), _isStarted(false), TimerBasic() {}
+
+		// Starts Stopwatch
+		void Start() const		{ ((TimerBasic*)this)->Start(); _isStarted = true; }
+
+		// Stops Stopwatch
+		//	@title: if not empty, and if instance was launched, output sum wall time with title
+		//	'const' to apply to constant objects
+		void Stop(const string title = strEmpty) const;
+};
+
+// 'Stopwatch' measures the sum of CPU time (clocks) intervals
+class StopwatchCPU
+{
+	private:
+		clock_t	_clock;
+		clock_t	_sumclock;
+
+	// Prints elapsed time interval
+	//	@parentheses: if true then output time in parentheses
+	//	@isCarrgReturn: if true then ended output by EOL
+	void PrintElapsed(bool parentheses, bool isCarriageReturn);
+
+	public:
+		inline StopwatchCPU()	{ _sumclock = 0; }
+
+		inline void Start()	{ _clock = clock(); }
+
+		void Stop(bool print = false);
 };
 
 #ifdef _MULTITHREAD

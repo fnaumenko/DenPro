@@ -80,8 +80,10 @@ public:
 		static const BYTE	_CasesCnt = 9;	// count of cases of feature/read ambiguities
 	
 		struct Case {
-			BYTE Type;
-			chrlen Count;
+			eAction Action;
+			chrlen	Count;
+			
+			inline eAction TickAction() { Count++; return Action; }
 		};
 		Case	_cases[_CasesCnt];
 		TabFile*	 _file;			// current reading file
@@ -94,15 +96,15 @@ public:
 		short	_treatcID;			// treated chrom ID: -1 initial, cID if only one chrom was treated.
 									// UnID if more then one chrom was treated
 #endif
-		// ***** treatment
+		// ***** actions
 		inline int Accept(eCase ambg)	{ return 1; }
 		inline int Handle(eCase ambg)	{ PrintLineAlarm(ambg); return 0; }
 		inline int Omit  (eCase ambg)	{ PrintLineAlarm(ambg); return -1; }
 		inline int OmitQuiet(eCase ambg){ return -1; }
 		inline int Abort (eCase ambg)	{ ThrowExcept(_Msgs[ambg].LineAlarm); return -1; }
 
-		// Get treatment message 
-		const inline char* Message(eCase ambig) const { return _ActionMsgs[_cases[ambig].Type]; }
+		// Get action message 
+		const inline char* Message(eCase ambig) const { return _ActionMsgs[_cases[ambig].Action]; }
 		
 		inline const string& EntityName(chrlen cnt = 1) const { return FT::ItemTitle(_fType, cnt!=1); }
 
@@ -138,6 +140,7 @@ public:
 
 	public:
 		bool unsortedItems;		// true if items are unsorted
+		chrlen	chrLen;			// length of readed chromosome
 
 		// Creates an instance with omitted COVER, SHORT, SCORE and NEGL cases;
 		// BedF cases by default:
@@ -166,14 +169,16 @@ public:
 #endif
 		// Initializes given Region by second and third current reading line positions, with validating
 		//	@rgn: Region that should be initialized
-		//	@cLen: chrom lemgth
+		//	@prevStart: previous start position
 		//	return: true if Region was initialized successfully
-		bool InitRegn(Region& rgn, chrlen cLen);
+		bool InitRegn(Region& rgn, chrlen prevStart);
 
 		// Adds statistics and print given ambiguity as alarm (if permitted)
 		//	@ambig: given ambiguity
 		//	return: treatment code: 1 - accept, 0 - handle, -1 - omit
-		int TreatCase(eCase ambig);
+		inline int TreatCase(eCase ambig) {
+			return (this->*_Actions[_cases[ambig].TickAction()])(ambig);
+		}
 
 		// Prints statistics.
 		//	@cID: readed chromosome's ID or Chrom::UnID if all
@@ -307,20 +312,25 @@ protected:
 
 	// Adds empty class type to the collection without checking cID
 	//	return: class type collection reference
-	T& AddEmptyClass(chrid cID) {
-	#ifdef _NO_UNODMAP
-		_chroms.push_back( chrItem(cID, T()) );
-		return (_chroms.end()-1)->second;
-	#else
-		return _chroms[cID];
-	#endif	// _NO_UNODMAP
-	}
+	//T& AddEmptyClass(chrid cID) {
+	//#ifdef _NO_UNODMAP
+	//	_chroms.push_back( chrItem(cID, T()) );
+	//	return (_chroms.end()-1)->second;
+	//#else
+	//	return _chroms[cID];
+	//#endif	// _NO_UNODMAP
+	//}
 
 	// Adds class type to the collection without checking cID.
 	// Avoids unnecessery copy constructor call
 	//	return: class type collection reference
-	inline const T & AddClass(chrid cID, const T & val) {
-		return AddEmptyClass(cID) = val;
+	inline T & AddClass(chrid cID, const T & val) {
+	#ifdef _NO_UNODMAP
+		_chroms.push_back( chrItem(cID, val) );
+		return (_chroms.end()-1)->second;
+	#else
+		return _chroms[cID] = val;
+	#endif	// _NO_UNODMAP
 	}
 
 public:
@@ -349,7 +359,7 @@ public:
 	}
 
 	// Returns count of chromosomes.
-	inline chrid ChromsCount () const { return _chroms.size(); }
+	inline chrid ChromsCount() const { return _chroms.size(); }
 
 	// Adds value type to the collection without checking cID
 	inline void AddVal(chrid cID, const T & val) {
@@ -465,6 +475,14 @@ class Bed : public Obj, public Chroms<ChromItemsInd>
  * strongly needs keyword 'abstract' but it doesn't compiled by GNU g++
  */
 {
+private:
+	// Checks if chromosome is uniq and adds it to the container
+	//	@cID: chroms id
+	//	@firstInd: first item index
+	//	@lastInd: last item index
+	//	@file: file to output message
+	void AddChrom(chrid cID, chrlen firstInd, chrlen lastInd, const TabFile& file);
+
 protected:
 	static const BYTE _FieldsCnt = 6;	// count of fields readed from file
 
@@ -531,6 +549,7 @@ public:
 
 #ifdef DEBUG
 	void PrintChrom() const;
+
 	// Prints Bed with limited or all items
 	//	@itemCnt: first number of items for each chromosome; all by default
 	void Print(chrlen itemCnt=0) const;
@@ -680,15 +699,15 @@ class BedR : public BedType<Read>
  */
 {
 private:
-	readlen	_readLen;			// length of Read
-	int		_minScore;			// score threshold: Reads with score <= _minScore are skipping
-	readscr	_maxScore;			// maximum score along Reads
+	readlen	_readLen;			// length of Read + 1
 #ifdef _BEDR_EXT
+	readscr	_minScore;			// score threshold: Reads with score <= _minScore are skipping
+	readscr	_maxScore;			// maximum score along Reads
 	Read::rNameType	_rNameType;		// type of Read name
 	bool		_paired;		// true if Reads are paired-end
 #endif
 	// Gets a copy of region by container iterator.
-	inline Region const Regn(cItemsIter it) const { return Region(it->Pos, it->Pos + _readLen); }
+	inline Region const Regn(cItemsIter it) const { return Region(it->Pos, it->Pos + ReadLen()); }
 
 	// Checks the element for the new potential start/end positions for all possible ambiguous.
 	//	@it: iterator reffering to the compared element
@@ -725,9 +744,9 @@ public:
 	//	@minScore: score threshold (Reads with score <= minScore are skipping)
 	BedR(const char* title, const string& fName, const ChromSizes* cSizes, eInfo info,
 		bool absolPrintfName, bool abortInvalid, bool alarm, bool acceptDupl=true, int minScore=vUNDEF )
-		: _readLen(0), _minScore(minScore)
+		: _readLen(0)
 #ifdef _BEDR_EXT
-		, _rNameType(Read::nmUndef), _paired(false), _maxScore(0)
+		, _rNameType(Read::nmUndef), _paired(false), _minScore(minScore), _maxScore(0)
 #endif
 	{ 
 		Ambig ambig(info, alarm, FT::ABED,
@@ -752,7 +771,7 @@ public:
 	inline const string& ItemTitle(bool pl = false) const { return FT::ItemTitle(FT::ABED, pl); };
 
 	// Gets length of Read.
-	inline readlen ReadLen()		const { return _readLen; }
+	inline readlen ReadLen()		const { return _readLen - 1; }
 
 	// Returns Read's start position.
 	//	@cID: chromosome's ID
