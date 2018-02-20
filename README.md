@@ -116,7 +116,11 @@ Default: ```ON```
 ```-c|--chr <name>```<br>
 Treat specified chromosome only. 
 ```name``` means short chromosome name, i.e. number or  character, for instance ```–c 10```, ```--chr X```.<br>
-The indication of one chromosome reduces run time on 1.5-20 times depending on how far this chromosome is placed in an alignment.
+The indication of one chromosome reduces run time on 1.5-20 times depending on how far this chromosome is placed in an alignment. 
+However, if reads are not grouped on chromosomes, the result will be unpredictable. 
+This is due to the fact that for the sake of efficiency the file reading stops on the first read, 
+which is different from the specified chromosome.<br>
+In the absence of this option, the unsorted sequence with ungrouped reads will be aborted.
 
 ```--min-scr <int>```<br>
 Score threshold for treated reads. 
